@@ -22,7 +22,7 @@ export default function App() {
     <Route path="/history" element={<HistoryPage workspace={workspace} reload={reload} />} />
     <Route path="/compare" element={<ComparePage workspace={workspace} />} />
     <Route path="/issues" element={<IssuesPage workspace={workspace} reload={reload} />} />
-    <Route path="/rules" element={<RulesPage workspace={workspace} />} />
+    <Route path="/rules" element={<RulesPage workspace={workspace} reload={reload} />} />
     <Route path="/settings" element={<SettingsPage workspace={workspace} reload={reload} />} />
     <Route path="*" element={<Navigate to="/overview" replace />} />
   </Routes></AppShell>;
