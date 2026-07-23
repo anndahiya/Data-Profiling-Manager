@@ -16,4 +16,10 @@ jobs:
           python-version: "3.11"
       - run: pip install -r requirements.txt
       - run: python -m unittest discover -s tests -v
-      - run: python -m py_compile app.py local_app.py data_profiler.py ai_helper.py browser_storage.py snapshot_manager.py schedule_helper.py monthly_profiling_agent.py
+      - run: python -m compileall -q .
+      - name: Import application modules
+        run: >-
+          python -c "import browser_storage, hosted_common, hosted_dashboard,
+          hosted_profile_pages, hosted_analysis_pages, hosted_settings_pages,
+          local_common, local_pages, data_profiler, ai_helper, snapshot_manager,
+          schedule_helper, monthly_profiling_agent"
