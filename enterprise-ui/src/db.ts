@@ -38,7 +38,7 @@ class DpmDatabase extends Dexie {
 export const db = new DpmDatabase();
 
 export async function clearWorkspace(): Promise<void> {
-  await db.transaction('rw', db.datasets, db.runs, db.issues, db.rules, db.dimensions, db.sourceHandles, async () => {
+  await db.transaction('rw', [db.datasets, db.runs, db.issues, db.rules, db.dimensions, db.sourceHandles], async () => {
     await Promise.all([
       db.datasets.clear(),
       db.runs.clear(),
