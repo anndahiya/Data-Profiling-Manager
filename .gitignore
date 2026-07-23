@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Local data and generated outputs
+*.xlsx
+*.xls
+*.parquet
+*.csv
+!steward_map.example.csv
+run_log.jsonl
+
+# Environment and editor files
+.env
+.DS_Store
+.vscode/
+.idea/
