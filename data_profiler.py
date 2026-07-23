@@ -30,6 +30,7 @@ TITLE_FONT = Font(color="FFFFFF", bold=True, name="Calibri", size=16)
 SUBTITLE_FONT = Font(color="6C72CB", italic=True, name="Calibri", size=10)
 THIN = Side(style="thin", color="D9D9D9")
 BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+FORMULA_PREFIXES = ("=", "+", "-", "@")
 
 
 def normalize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
@@ -83,13 +84,10 @@ def duplicate_row_count(df: pd.DataFrame) -> int:
         return int(comparable.duplicated().sum())
 
 
-def style_header_row(ws, row: int, ncols: int) -> None:
-    for column in range(1, ncols + 1):
-        cell = ws.cell(row=row, column=column)
-        cell.fill = HEADER_FILL
-        cell.font = HEADER_FONT
-        cell.alignment = Alignment(horizontal="center", vertical="center")
-        cell.border = BORDER
+def _excel_text(value: str) -> str:
+    """Keep source-derived strings from being interpreted as Excel formulas."""
+    stripped = value.lstrip()
+    return f"'{value}" if stripped.startswith(FORMULA_PREFIXES) else value
 
 
 def _excel_value(value: Any) -> Any:
@@ -103,8 +101,19 @@ def _excel_value(value: Any) -> Any:
     except (TypeError, ValueError):
         pass
     if isinstance(value, (dict, list, tuple, set, np.ndarray)):
-        return json.dumps(value, default=str)
+        value = json.dumps(value, default=str)
+    if isinstance(value, str):
+        return _excel_text(value)
     return value
+
+
+def style_header_row(ws, row: int, ncols: int) -> None:
+    for column in range(1, ncols + 1):
+        cell = ws.cell(row=row, column=column)
+        cell.fill = HEADER_FILL
+        cell.font = HEADER_FONT
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.border = BORDER
 
 
 def write_df(ws, df: pd.DataFrame, start_row: int = 1, stripe: bool = True) -> int:
@@ -112,7 +121,7 @@ def write_df(ws, df: pd.DataFrame, start_row: int = 1, stripe: bool = True) -> i
         ws.cell(row=start_row, column=1, value="No profile rows")
         return start_row
     for j, column in enumerate(df.columns, 1):
-        ws.cell(row=start_row, column=j, value=str(column))
+        ws.cell(row=start_row, column=j, value=_excel_value(str(column)))
     style_header_row(ws, start_row, max(1, len(df.columns)))
     for i, row in enumerate(df.itertuples(index=False), start_row + 1):
         for j, value in enumerate(row, 1):
@@ -137,13 +146,13 @@ def autofit(ws, max_width: int = 42) -> None:
 def add_title(ws, title: str, subtitle: str, ncols: int) -> None:
     ncols = max(1, ncols)
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncols)
-    cell = ws.cell(row=1, column=1, value=title)
+    cell = ws.cell(row=1, column=1, value=_excel_value(title))
     cell.fill = TITLE_FILL
     cell.font = TITLE_FONT
     cell.alignment = Alignment(horizontal="left", vertical="center", indent=1)
     ws.row_dimensions[1].height = 30
     ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=ncols)
-    sub = ws.cell(row=2, column=1, value=subtitle)
+    sub = ws.cell(row=2, column=1, value=_excel_value(subtitle))
     sub.font = SUBTITLE_FONT
     sub.alignment = Alignment(horizontal="left", indent=1)
 
