@@ -6,6 +6,7 @@ from hosted_dashboard import render_dashboard
 from hosted_profile_pages import render_datasets, render_profile, render_report_viewer
 from hosted_analysis_pages import render_ai, render_compare, render_history, render_monitor, render_trends
 from hosted_settings_pages import render_plugins, render_scheduling, render_settings
+from navigation import render_sidebar_menu
 
 st.set_page_config(page_title="Data Profiling Manager", page_icon="📊", layout="wide")
 apply_brand()
@@ -22,18 +23,14 @@ if not storage_ready:
 requested_page = st.session_state.pop("_requested_page", None)
 if requested_page in PAGES:
     st.session_state["page"] = requested_page
-    st.session_state["nav_page"] = requested_page
 
 st.session_state.setdefault("page", "Dashboard")
-st.session_state.setdefault("nav_page", st.session_state["page"])
-with st.sidebar:
-    st.markdown("### Navigation")
-    nav = st.radio("Navigation", PAGES, key="nav_page", label_visibility="collapsed")
-    st.divider()
-    st.caption("Saved history belongs to this browser profile. Use Settings to download a backup.")
-if nav != st.session_state["page"]:
-    st.session_state["page"] = nav
 page = st.session_state["page"]
+render_sidebar_menu(
+    PAGES,
+    page,
+    caption="Saved history belongs to this browser profile. Use Settings to download a backup.",
+)
 
 with st.expander("Privacy, persistence, and hosted-app limits", expanded=False):
     st.markdown(
