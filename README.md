@@ -1,8 +1,10 @@
 # Data Profiling Manager
 
-**Profile. Explain. Schedule.**
+**Profile. Monitor. Compare.**
 
 Data Profiling Manager is an open-source Streamlit application for profiling CSV, Excel, and Parquet datasets, generating downloadable Excel reports, and optionally explaining aggregate results with Gemini.
+
+The interface and Excel reports use the same deep-indigo and periwinkle visual system. The dashboard cards are real navigation controls, not decorative links.
 
 The repository includes two entry points so the hosted version stays safe for multiple visitors without stripping out the full local workflow.
 
@@ -20,7 +22,7 @@ Use this entry point on Streamlit Community Cloud.
 - no shared Gemini key
 - no intentional cross-user dataset history
 
-The hosted site cannot retain a temporary browser upload and profile it again after the visitor leaves. Its Scheduling & email tab generates the configuration and workflow needed by a durable runner.
+The hosted site cannot retain a temporary browser upload and profile it again after the visitor leaves. Its Scheduling & email page generates the configuration and workflow needed by a durable runner.
 
 ## 2. Full local manager — `local_app.py`
 
