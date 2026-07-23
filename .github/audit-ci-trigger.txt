@@ -1,2 +1,2 @@
 Temporary file used to run the full pull-request CI audit on Python 3.11 and 3.14.
-Audit rerun after dependency, hosted, local, and transcript fixes.
+Audit rerun after dependency, hosted, local, formula-safety, and test fixes.
