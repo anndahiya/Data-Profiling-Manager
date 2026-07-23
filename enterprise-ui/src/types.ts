@@ -5,6 +5,8 @@ export type IssueStatus = 'Open' | 'Acknowledged' | 'Resolved' | 'Closed';
 export type SourceMode = 'manual-upload' | 'linked-file' | 'linked-folder' | 'database';
 export type RuleSeverity = 'Critical' | 'High' | 'Medium' | 'Low' | 'Info';
 export type RuleType = 'not-null' | 'unique' | 'type' | 'pattern' | 'freshness' | 'range' | 'allowed-values' | 'min-length' | 'max-length';
+export type ScheduleCadence = 'Weekly' | 'Monthly' | 'Quarterly' | 'Yearly';
+export type DeliveryMode = 'every-run' | 'breach-only';
 
 export interface DatasetSource {
   mode: SourceMode;
@@ -111,6 +113,33 @@ export interface QualityDimension {
   updatedAt: string;
 }
 
+export interface MonitorPolicy {
+  id: string;
+  datasetId: string;
+  enabled: boolean;
+  sourcePath: string;
+  recipientName: string;
+  recipientEmail: string;
+  ccEmails?: string;
+  cadence: ScheduleCadence;
+  weekday: string;
+  dayOfMonth: number;
+  month: number;
+  hourUtc: number;
+  minute: number;
+  deliveryMode: DeliveryMode;
+  attachReport: boolean;
+  aiSummary: boolean;
+  minimumOverallQuality?: number;
+  minimumRecordCompliance?: number;
+  maximumMissingPercent?: number;
+  maximumDuplicateRows?: number;
+  maximumRowChangePercent?: number;
+  maximumFreshnessHours?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Dataset {
   id: string;
   name: string;
@@ -187,4 +216,5 @@ export interface WorkspaceSnapshot {
   issues: Issue[];
   rules: QualityRule[];
   dimensions?: QualityDimension[];
+  monitors?: MonitorPolicy[];
 }
