@@ -1,0 +1,1 @@
+Temporary file used only to run the website-style navigation audit on Python 3.11 and 3.14.
