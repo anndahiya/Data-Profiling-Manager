@@ -1,6 +1,6 @@
 import type { DimensionResult, ProfileRun, WorkspaceSnapshot } from './types';
 
-export const CHART_COLORS = ['#5b5bd6', '#8b5cf6', '#0ea5a4', '#d97706', '#db2777'];
+export const CHART_COLORS = ['#5b5bd6', '#8b5cf6', '#0ea5a4', '#d97706', '#db2777', '#2563eb', '#7c3aed', '#059669'];
 
 export function formatDate(value?: string): string {
   if (!value) return 'Never';
@@ -20,9 +20,9 @@ export function latestRunFor(datasetId: string, runs: ProfileRun[]): ProfileRun 
 }
 
 function weightedQuality(runs: ProfileRun[]): number {
-  const evaluated = runs.reduce((sum, run) => sum + run.quality.evaluatedRecords, 0);
-  const passing = runs.reduce((sum, run) => sum + run.quality.passingRecords, 0);
-  return evaluated ? (passing / evaluated) * 100 : 0;
+  const evaluated = runs.reduce((sum, run) => sum + Math.max(1, run.quality.evaluatedRecords), 0);
+  const score = runs.reduce((sum, run) => sum + run.quality.overallScore * Math.max(1, run.quality.evaluatedRecords), 0);
+  return evaluated ? score / evaluated : 0;
 }
 
 export function weightedOverallQuality(workspace: WorkspaceSnapshot): number {
@@ -46,13 +46,13 @@ export function workspaceQualityTrend(workspace: WorkspaceSnapshot): Array<{ dat
 
 export function weightedDimensions(workspace: WorkspaceSnapshot): Array<{ dimension: string; score: number }> {
   const latest = workspace.datasets.map((dataset) => latestRunFor(dataset.id, workspace.runs)).filter(Boolean) as ProfileRun[];
-  const names = ['Completeness', 'Validity', 'Uniqueness', 'Consistency', 'Timeliness'];
+  const names = [...new Set(latest.flatMap((run) => run.quality.dimensions.map((dimension) => dimension.dimension)))];
   return names.map((dimension) => {
     const results = latest
-      .map((run) => run.quality.dimensions.find((item) => item.dimension === dimension))
-      .filter((item): item is DimensionResult => Boolean(item));
-    const evaluated = results.reduce((sum, result) => sum + result.passingRecords + result.failingRecords, 0);
-    const passing = results.reduce((sum, result) => sum + result.passingRecords, 0);
-    return { dimension, score: evaluated ? (passing / evaluated) * 100 : 0 };
-  }).filter((item) => item.score > 0);
+      .map((run) => ({ run, result: run.quality.dimensions.find((item) => item.dimension === dimension) }))
+      .filter((item): item is { run: ProfileRun; result: DimensionResult } => Boolean(item.result));
+    const evaluated = results.reduce((sum, item) => sum + Math.max(1, item.run.quality.evaluatedRecords), 0);
+    const score = results.reduce((sum, item) => sum + item.result.score * Math.max(1, item.run.quality.evaluatedRecords), 0);
+    return { dimension, score: evaluated ? score / evaluated : 0 };
+  }).sort((a, b) => a.dimension.localeCompare(b.dimension));
 }
