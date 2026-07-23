@@ -1,8 +1,7 @@
 """Public Streamlit edition of Data Profiling Manager.
 
-This entry point is safe for a shared hosted deployment: uploaded data and API
-keys are kept in the visitor's current session. It also restores the original
-branded manager layout and schedule/email setup flow.
+The hosted app keeps uploads and API keys in the visitor's current session.
+The full persistent manager is available in local_app.py.
 """
 from __future__ import annotations
 
@@ -20,6 +19,16 @@ from schedule_helper import CADENCES, build_workflow_yaml, config_to_csv
 REPORT_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 MAX_UPLOAD_MB = 50
 MAX_PREVIEW_ROWS = 50
+
+PAGES = ["Dashboard", "Profile dataset", "AI explanation", "Scheduling & email", "Local manager"]
+PAGE_SLUGS = {
+    "Dashboard": "dashboard",
+    "Profile dataset": "profile",
+    "AI explanation": "ai",
+    "Scheduling & email": "schedule",
+    "Local manager": "local",
+}
+SLUG_PAGES = {value: key for key, value in PAGE_SLUGS.items()}
 
 
 def clean_name(name: str) -> str:
@@ -56,54 +65,96 @@ def apply_brand() -> None:
     st.markdown(
         """
         <style>
-        .stApp { background: #ffffff; }
-        .block-container { max-width: 1450px; padding-top: 1.2rem; }
+        :root {
+            --dpm-deep: #2D2A6E;
+            --dpm-primary: #6C72CB;
+            --dpm-soft: #EEF0FB;
+            --dpm-ink: #202335;
+            --dpm-muted: #667085;
+            --dpm-border: #D9DDEA;
+        }
+        .stApp { background: #FFFFFF; color: var(--dpm-ink); }
+        .block-container {
+            max-width: 1450px;
+            padding-top: 4.75rem;
+            padding-bottom: 3rem;
+        }
         .brand-header {
-            background: #68053f;
+            background: linear-gradient(135deg, var(--dpm-deep) 0%, var(--dpm-primary) 100%);
             color: white;
-            margin: -1.2rem -5rem 1.25rem -5rem;
-            padding: 1.45rem 5rem;
+            padding: 1.45rem 1.7rem;
+            margin: 0 0 1.2rem 0;
+            border-radius: 20px;
             display: flex;
             justify-content: space-between;
             align-items: center;
+            gap: 1rem;
+            box-shadow: 0 10px 28px rgba(45, 42, 110, 0.14);
         }
-        .brand-title { font-size: 2rem; font-weight: 760; margin: 0; }
-        .brand-subtitle { font-size: 1rem; opacity: .92; }
+        .brand-title {
+            font-size: clamp(1.65rem, 2.6vw, 2.2rem);
+            font-weight: 760;
+            line-height: 1.15;
+            margin: 0;
+        }
+        .brand-subtitle {
+            font-size: 1rem;
+            line-height: 1.35;
+            opacity: .94;
+            white-space: nowrap;
+        }
+        h1, h2, h3, h4 { color: var(--dpm-ink); line-height: 1.25 !important; }
         div[data-testid="stMetric"] {
-            border: 1px solid #dedfe6;
+            border: 1px solid var(--dpm-border);
             border-radius: 16px;
             padding: 1rem 1.1rem;
-            background: #fff;
+            background: #FFFFFF;
+            box-shadow: 0 3px 12px rgba(32, 35, 53, 0.035);
         }
         button[kind="primary"], .stDownloadButton button {
-            background: #68053f !important;
+            background: var(--dpm-deep) !important;
             color: white !important;
-            border-color: #68053f !important;
+            border-color: var(--dpm-deep) !important;
             border-radius: 11px !important;
         }
         button[kind="primary"]:hover, .stDownloadButton button:hover {
-            background: #520331 !important;
-            border-color: #520331 !important;
+            background: #211F58 !important;
+            border-color: #211F58 !important;
         }
-        .stTabs [data-baseweb="tab-list"] { gap: .55rem; flex-wrap: wrap; }
-        .stTabs [data-baseweb="tab"] {
-            border: 1px solid #dedfe6;
-            border-radius: 14px;
-            padding: .55rem 1.05rem;
-            background: #fafafa;
+        button[kind="secondary"] {
+            border-color: var(--dpm-primary) !important;
+            color: var(--dpm-deep) !important;
+            border-radius: 11px !important;
         }
-        .stTabs [aria-selected="true"] {
-            background: #fff0f8 !important;
-            color: #68053f !important;
+        div[role="radiogroup"] {
+            gap: .45rem;
+            flex-wrap: wrap;
+            margin-bottom: .75rem;
+        }
+        div[role="radiogroup"] > label {
+            border: 1px solid var(--dpm-border);
+            border-radius: 999px;
+            padding: .42rem .82rem;
+            background: #FAFAFC;
+        }
+        div[role="radiogroup"] > label:has(input:checked) {
+            background: var(--dpm-soft);
+            border-color: var(--dpm-primary);
+            color: var(--dpm-deep);
             font-weight: 700;
         }
-        .feature-card {
-            border: 1px solid #dedfe6;
-            border-radius: 16px;
-            padding: 1.2rem;
-            min-height: 150px;
+        div[role="radiogroup"] > label > div:first-child { display: none; }
+        [data-testid="stVerticalBlockBorderWrapper"] {
+            border-color: var(--dpm-border) !important;
+            border-radius: 18px !important;
+            box-shadow: 0 4px 16px rgba(32, 35, 53, 0.035);
         }
-        .muted { color: #697386; }
+        .section-intro { color: var(--dpm-muted); margin-top: -.35rem; margin-bottom: 1rem; }
+        @media (max-width: 700px) {
+            .block-container { padding-top: 4.25rem; }
+            .brand-header { align-items: flex-start; flex-direction: column; }
+            .brand-subtitle { white-space: normal; }
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -112,11 +163,44 @@ def apply_brand() -> None:
         """
         <div class="brand-header">
           <div class="brand-title">Data Profiling Manager</div>
-          <div class="brand-subtitle">Profile • Explain • Schedule</div>
+          <div class="brand-subtitle">Profile. Monitor. Compare.</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
+
+
+def navigate(page: str) -> None:
+    st.session_state["active_page"] = page
+    st.session_state["nav_page"] = page
+    try:
+        st.query_params["page"] = PAGE_SLUGS[page]
+    except Exception:
+        pass
+
+
+def sync_navigation() -> None:
+    page = st.session_state["nav_page"]
+    st.session_state["active_page"] = page
+    try:
+        st.query_params["page"] = PAGE_SLUGS[page]
+    except Exception:
+        pass
+
+
+def feature_card(column, title: str, description: str, button_label: str, destination: str, primary: bool = False) -> None:
+    with column:
+        with st.container(border=True):
+            st.subheader(title)
+            st.write(description)
+            st.button(
+                button_label,
+                key=f"dashboard_{PAGE_SLUGS[destination]}",
+                use_container_width=True,
+                type="primary" if primary else "secondary",
+                on_click=navigate,
+                args=(destination,),
+            )
 
 
 st.set_page_config(page_title="Data Profiling Manager", page_icon="📊", layout="wide")
@@ -127,8 +211,19 @@ for key, default in {
     "profile_name": None,
     "profile_size_mb": None,
     "ai_summary": None,
+    "schedule_config_csv": None,
+    "schedule_workflow": None,
 }.items():
     st.session_state.setdefault(key, default)
+
+query_slug = None
+try:
+    query_slug = st.query_params.get("page")
+except Exception:
+    query_slug = None
+initial_page = SLUG_PAGES.get(query_slug, "Dashboard")
+st.session_state.setdefault("active_page", initial_page)
+st.session_state.setdefault("nav_page", st.session_state["active_page"])
 
 with st.expander("Privacy and hosted-app limits", expanded=False):
     st.markdown(
@@ -141,27 +236,57 @@ with st.expander("Privacy and hosted-app limits", expanded=False):
         """
     )
 
-tab_dashboard, tab_profile, tab_ai, tab_schedule, tab_local = st.tabs(
-    ["Dashboard", "Profile dataset", "AI explanation", "Scheduling & email", "Local manager"]
+st.radio(
+    "Navigation",
+    PAGES,
+    horizontal=True,
+    key="nav_page",
+    label_visibility="collapsed",
+    on_change=sync_navigation,
 )
+page = st.session_state["active_page"]
 
-with tab_dashboard:
+if page == "Dashboard":
     st.header("Dashboard")
-    st.caption("The hosted edition is for immediate profiling. The repository also includes a full local manager with saved datasets, history, and private scheduling.")
+    st.markdown(
+        '<p class="section-intro">Profile a dataset immediately, explain the aggregate results with Gemini, or prepare recurring report delivery.</p>',
+        unsafe_allow_html=True,
+    )
     df = st.session_state["profile_df"]
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Current dataset", st.session_state["profile_name"] or "None")
     c2.metric("Rows", f"{len(df):,}" if isinstance(df, pd.DataFrame) else "—")
     c3.metric("Columns", f"{df.shape[1]:,}" if isinstance(df, pd.DataFrame) else "—")
     c4.metric("Duplicate rows", f"{df.duplicated().sum():,}" if isinstance(df, pd.DataFrame) else "—")
-    st.markdown("### Choose how you want to use it")
-    a, b, c = st.columns(3)
-    a.markdown('<div class="feature-card"><h4>Profile now</h4><p class="muted">Upload CSV, Excel, or Parquet and download a report immediately.</p></div>', unsafe_allow_html=True)
-    b.markdown('<div class="feature-card"><h4>Explain with Gemini</h4><p class="muted">Use your own API key. Gemini receives aggregate metrics only.</p></div>', unsafe_allow_html=True)
-    c.markdown('<div class="feature-card"><h4>Schedule reports</h4><p class="muted">Generate the configuration and workflow for recurring profiling and email delivery.</p></div>', unsafe_allow_html=True)
 
-with tab_profile:
+    st.subheader("Choose how you want to use it")
+    a, b, c = st.columns(3)
+    feature_card(
+        a,
+        "Profile a dataset",
+        "Upload CSV, Excel, or Parquet and download a profiling report immediately.",
+        "Start profiling",
+        "Profile dataset",
+        primary=True,
+    )
+    feature_card(
+        b,
+        "Explain with Gemini",
+        "Use your own Gemini API key. Only aggregate profiling metrics are sent.",
+        "Open AI explanation",
+        "AI explanation",
+    )
+    feature_card(
+        c,
+        "Schedule reports",
+        "Generate configuration for recurring profiling and scheduled email delivery.",
+        "Set up scheduling",
+        "Scheduling & email",
+    )
+
+elif page == "Profile dataset":
     st.header("Profile dataset")
+    st.markdown('<p class="section-intro">Upload one file, inspect the profile, and download a formatted Excel workbook.</p>', unsafe_allow_html=True)
     uploaded = st.file_uploader("Upload CSV, Excel, or Parquet", type=["csv", "xlsx", "xls", "parquet"])
     if uploaded:
         size_mb = uploaded.size / 1_000_000
@@ -215,11 +340,13 @@ with tab_profile:
         except Exception as exc:
             st.error(f"Could not create the report: {exc}")
 
-with tab_ai:
+elif page == "AI explanation":
     st.header("AI explanation")
+    st.markdown('<p class="section-intro">Generate a plain-language explanation from aggregate profiling metrics.</p>', unsafe_allow_html=True)
     df = st.session_state["profile_df"]
     if not isinstance(df, pd.DataFrame):
         st.info("Profile a dataset first.")
+        st.button("Go to profiler", type="primary", on_click=navigate, args=("Profile dataset",))
     else:
         st.caption("Enter your Gemini API key in the masked field. This is your Gemini credential, not a password for this app. The key is not written to disk by the application.")
         api_key = st.text_input("Gemini API key", type="password", key="gemini_api_key")
@@ -240,9 +367,9 @@ with tab_ai:
         with st.expander("See exactly what is sent to Gemini"):
             st.json(build_ai_payload(df, st.session_state["profile_name"]))
 
-with tab_schedule:
+elif page == "Scheduling & email":
     st.header("Scheduling & email")
-    st.caption("Configure recurring profiling and report delivery, then download the files needed by your local scheduler or GitHub Actions.")
+    st.markdown('<p class="section-intro">Prepare recurring profiling and email delivery for a durable dataset source.</p>', unsafe_allow_html=True)
     st.warning(
         "The public Streamlit site cannot keep a browser upload after you leave. For recurring jobs, the scheduled runner needs a durable file path or URL. "
         "Use the local manager for private files, or a runner that can access the source."
@@ -260,7 +387,7 @@ with tab_schedule:
         minute = col4.number_input("Minute", min_value=0, max_value=59, value=15)
         month = st.number_input("Month for yearly schedule", min_value=1, max_value=12, value=1)
         ai_summary_enabled = st.checkbox("Include Gemini explanation when GEMINI_API_KEY is configured", value=True)
-        generate = st.form_submit_button("Generate scheduling files")
+        generate = st.form_submit_button("Generate scheduling files", type="primary")
 
     if generate:
         if not dataset or not source or not recipient_email:
@@ -279,10 +406,8 @@ with tab_schedule:
                 "minute": int(minute),
                 "ai_summary": bool(ai_summary_enabled),
             }
-            config_csv = config_to_csv(config)
-            workflow = build_workflow_yaml(config)
-            st.session_state["schedule_config_csv"] = config_csv
-            st.session_state["schedule_workflow"] = workflow
+            st.session_state["schedule_config_csv"] = config_to_csv(config)
+            st.session_state["schedule_workflow"] = build_workflow_yaml(config)
 
     if st.session_state.get("schedule_config_csv"):
         c1, c2 = st.columns(2)
@@ -292,11 +417,12 @@ with tab_schedule:
             st.code(st.session_state["schedule_workflow"], language="yaml")
         st.info("The repository's `monthly_profiling_agent.py` reads this configuration, creates the report, optionally adds a Gemini explanation, and emails the workbook using your SMTP secrets.")
 
-with tab_local:
+elif page == "Local manager":
     st.header("Local manager")
+    st.markdown('<p class="section-intro">Use the full manager for private data, saved datasets, history, and recurring local work.</p>', unsafe_allow_html=True)
     st.markdown(
         """
-The repository now includes **`local_app.py`**, which restores the full local workflow:
+The repository includes **`local_app.py`**, which provides the complete local workflow:
 
 - register datasets once using local file paths
 - edit or delete saved datasets
