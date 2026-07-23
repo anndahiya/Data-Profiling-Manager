@@ -196,6 +196,7 @@ function profileColumn(name: string, rows: DataRow[]): ColumnProfile {
     outlierCount = numericValues.filter((value) => value < lower || value > upper).length;
   }
   const patternList = patternEntries(patterns, nonNull.length);
+  const identifierHint = /(^|_)(id|key|code|number|no)($|_)/i.test(name);
   return {
     name,
     inferredType,
@@ -207,7 +208,7 @@ function profileColumn(name: string, rows: DataRow[]): ColumnProfile {
     duplicateValueCount,
     uniquenessPercentage: nonNull.length ? (uniqueCount / nonNull.length) * 100 : 0,
     outlierCount,
-    likelyKey: nonNull.length > 0 && frequencies.size / nonNull.length >= 0.98,
+    likelyKey: identifierHint && nonNull.length > 0 && frequencies.size / nonNull.length >= 0.98,
     dominantPattern: patternList[0]?.pattern,
     dominantPatternPercentage: patternList[0]?.percentage,
     topValues: topEntries(frequencies, nonNull.length, 5),
