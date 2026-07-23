@@ -1,0 +1,19 @@
+name: Test Data Profiling Manager
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -v
+      - run: python -m py_compile app.py local_app.py data_profiler.py ai_helper.py browser_storage.py snapshot_manager.py schedule_helper.py monthly_profiling_agent.py
