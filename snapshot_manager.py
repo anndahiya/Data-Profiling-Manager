@@ -1,4 +1,4 @@
-"""Create, compare, trend, and export deterministic profiling snapshots."""
+"""Create, retain, compare, trend, monitor, and export profiling snapshots."""
 from __future__ import annotations
 
 import json
@@ -13,11 +13,12 @@ import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
-from data_profiler import advanced_profile, basic_profile
+from data_profiler import advanced_profile, basic_profile, correlation_matrix, duplicate_row_count, normalize_dataframe
 
-DATA_VERSION = 1
+DATA_VERSION = 2
 MAX_RUNS_PER_DATASET = 30
 MAX_TOTAL_RUNS = 150
+MAX_FAILURES = 100
 MAX_BROWSER_DATA_BYTES = 4_000_000
 
 HEADER_FILL = PatternFill("solid", fgColor="6C72CB")
@@ -30,12 +31,23 @@ BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
 
 
 def empty_workspace() -> dict[str, Any]:
-    return {"version": DATA_VERSION, "datasets": [], "runs": [], "updated_at": None}
+    return {"version": DATA_VERSION, "datasets": [], "runs": [], "failures": [], "updated_at": None}
 
 
 def clean_id(value: str) -> str:
     cleaned = re.sub(r"[^a-zA-Z0-9_-]+", "-", value.strip()).strip("-").lower()
     return cleaned or f"dataset-{uuid.uuid4().hex[:8]}"
+
+
+def unique_dataset_id(workspace: dict[str, Any], requested_name: str) -> str:
+    base = clean_id(requested_name)
+    existing = {str(item.get("id")) for item in workspace.get("datasets", [])}
+    if base not in existing:
+        return base
+    index = 2
+    while f"{base}-{index}" in existing:
+        index += 1
+    return f"{base}-{index}"
 
 
 def _safe(value: Any) -> Any:
@@ -55,7 +67,9 @@ def _safe(value: Any) -> Any:
     return str(value)
 
 
-def _records(frame: pd.DataFrame) -> list[dict[str, Any]]:
+def _records(frame: pd.DataFrame | None) -> list[dict[str, Any]]:
+    if frame is None or frame.empty:
+        return []
     return [{str(key): _safe(value) for key, value in row.items()} for row in frame.to_dict(orient="records")]
 
 
@@ -67,31 +81,60 @@ def create_snapshot(
     source_name: str,
     owner: str = "",
 ) -> dict[str, Any]:
-    basic = basic_profile(df)[
+    data = normalize_dataframe(df)
+    basic = basic_profile(data)[
         ["Column", "Dtype", "Count", "Missing", "Missing %", "Unique", "Unique %", "Top Freq", "Mean", "Std"]
     ]
-    advanced = advanced_profile(df)
+    advanced = advanced_profile(data)
+    correlation = correlation_matrix(data)
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     return {
         "run_id": uuid.uuid4().hex,
+        "status": "success",
         "dataset_id": dataset_id,
         "dataset_name": dataset_name,
         "source_name": source_name,
         "owner": owner,
         "profiled_at": now,
-        "rows": int(len(df)),
-        "columns": int(df.shape[1]),
-        "duplicate_rows": int(df.duplicated().sum()),
-        "missing_cells": int(df.isna().sum().sum()),
-        "overall_missing_percent": round(float(df.isna().sum().sum() / df.size * 100), 2) if df.size else 0.0,
-        "memory_mb": round(float(df.memory_usage(deep=True).sum() / 1_000_000), 2),
-        "numeric_columns": int(df.select_dtypes(include=np.number).shape[1]),
-        "categorical_columns": int(df.select_dtypes(exclude=np.number).shape[1]),
+        "rows": int(len(data)),
+        "columns": int(data.shape[1]),
+        "duplicate_rows": duplicate_row_count(data),
+        "missing_cells": int(data.isna().sum().sum()),
+        "overall_missing_percent": round(float(data.isna().sum().sum() / data.size * 100), 2) if data.size else 0.0,
+        "memory_mb": round(float(data.memory_usage(deep=True).sum() / 1_000_000), 2),
+        "numeric_columns": int(data.select_dtypes(include=np.number).shape[1]),
+        "categorical_columns": int(data.select_dtypes(exclude=np.number).shape[1]),
         "basic_profile": _records(basic),
         "advanced_profile": _records(advanced),
-        "schema": {str(column): str(dtype) for column, dtype in df.dtypes.items()},
+        "correlation_profile": _records(correlation),
+        "schema": {str(column): str(dtype) for column, dtype in data.dtypes.items()},
+        "column_renames": data.attrs.get("column_renames", []),
         "ai_summary": None,
     }
+
+
+def add_failure(
+    workspace: dict[str, Any],
+    *,
+    dataset_name: str,
+    source_name: str,
+    error_message: str,
+    dataset_id: str | None = None,
+) -> dict[str, Any]:
+    failure = {
+        "event_id": uuid.uuid4().hex,
+        "status": "failed",
+        "dataset_id": dataset_id,
+        "dataset_name": dataset_name or "Unregistered dataset",
+        "source_name": source_name,
+        "profiled_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "error": error_message[:500],
+    }
+    failures = workspace.setdefault("failures", [])
+    failures.append(failure)
+    failures[:] = failures[-MAX_FAILURES:]
+    workspace["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return failure
 
 
 def upsert_dataset(
@@ -101,6 +144,8 @@ def upsert_dataset(
     dataset_name: str,
     source_name: str,
     owner: str = "",
+    description: str = "",
+    tags: list[str] | None = None,
 ) -> None:
     datasets = workspace.setdefault("datasets", [])
     existing = next((item for item in datasets if item.get("id") == dataset_id), None)
@@ -110,18 +155,30 @@ def upsert_dataset(
         "name": dataset_name,
         "source_name": source_name,
         "owner": owner,
+        "description": description,
+        "tags": tags or [],
         "updated_at": now,
     }
     if existing:
+        schedule = existing.get("schedule")
         existing.update(payload)
+        if schedule:
+            existing["schedule"] = schedule
     else:
         payload["created_at"] = now
         datasets.append(payload)
     datasets.sort(key=lambda item: str(item.get("name", "")).lower())
 
 
+def successful_runs(workspace: dict[str, Any]) -> list[dict[str, Any]]:
+    return [run for run in workspace.get("runs", []) if run.get("status", "success") == "success"]
+
+
 def add_snapshot(workspace: dict[str, Any], snapshot: dict[str, Any]) -> None:
+    snapshot.setdefault("status", "success")
     runs = workspace.setdefault("runs", [])
+    if any(run.get("run_id") == snapshot.get("run_id") for run in runs):
+        return
     runs.append(snapshot)
     runs.sort(key=lambda item: item.get("profiled_at", ""))
     dataset_id = snapshot.get("dataset_id")
@@ -131,20 +188,20 @@ def add_snapshot(workspace: dict[str, Any], snapshot: dict[str, Any]) -> None:
         runs[:] = [run for run in runs if run.get("run_id") not in remove_ids]
     if len(runs) > MAX_TOTAL_RUNS:
         runs[:] = runs[-MAX_TOTAL_RUNS:]
-    while len(json.dumps(workspace, ensure_ascii=False).encode("utf-8")) > MAX_BROWSER_DATA_BYTES and len(runs) > 1:
+    while len(json.dumps(workspace, ensure_ascii=False, default=str).encode("utf-8")) > MAX_BROWSER_DATA_BYTES and len(runs) > 1:
         runs.pop(0)
     workspace["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def dataset_runs(workspace: dict[str, Any], dataset_id: str) -> list[dict[str, Any]]:
     return sorted(
-        [run for run in workspace.get("runs", []) if run.get("dataset_id") == dataset_id],
+        [run for run in successful_runs(workspace) if run.get("dataset_id") == dataset_id],
         key=lambda item: item.get("profiled_at", ""),
     )
 
 
 def latest_run(workspace: dict[str, Any], dataset_id: str | None = None) -> dict[str, Any] | None:
-    runs = workspace.get("runs", [])
+    runs = successful_runs(workspace)
     if dataset_id:
         runs = [run for run in runs if run.get("dataset_id") == dataset_id]
     return max(runs, key=lambda item: item.get("profiled_at", ""), default=None)
@@ -153,7 +210,7 @@ def latest_run(workspace: dict[str, Any], dataset_id: str | None = None) -> dict
 def find_run(workspace: dict[str, Any], run_id: str | None) -> dict[str, Any] | None:
     if not run_id:
         return None
-    return next((run for run in workspace.get("runs", []) if run.get("run_id") == run_id), None)
+    return next((run for run in successful_runs(workspace) if run.get("run_id") == run_id), None)
 
 
 def compare_runs(older: dict[str, Any], newer: dict[str, Any]) -> dict[str, Any]:
@@ -189,10 +246,10 @@ def compare_runs(older: dict[str, Any], newer: dict[str, Any]) -> dict[str, Any]
             )
     return {
         "summary": {
-            "Rows": newer.get("rows", 0) - older.get("rows", 0),
-            "Columns": newer.get("columns", 0) - older.get("columns", 0),
-            "Duplicate rows": newer.get("duplicate_rows", 0) - older.get("duplicate_rows", 0),
-            "Missing cells": newer.get("missing_cells", 0) - older.get("missing_cells", 0),
+            "Rows": int(newer.get("rows", 0)) - int(older.get("rows", 0)),
+            "Columns": int(newer.get("columns", 0)) - int(older.get("columns", 0)),
+            "Duplicate rows": int(newer.get("duplicate_rows", 0)) - int(older.get("duplicate_rows", 0)),
+            "Missing cells": int(newer.get("missing_cells", 0)) - int(older.get("missing_cells", 0)),
             "Overall missing %": round(float(newer.get("overall_missing_percent", 0)) - float(older.get("overall_missing_percent", 0)), 2),
             "Memory MB": round(float(newer.get("memory_mb", 0)) - float(older.get("memory_mb", 0)), 2),
         },
@@ -206,17 +263,20 @@ def compare_runs(older: dict[str, Any], newer: dict[str, Any]) -> dict[str, Any]
 def trend_frame(runs: list[dict[str, Any]]) -> pd.DataFrame:
     rows = [
         {
-            "Profiled at": pd.to_datetime(run.get("profiled_at"), utc=True),
-            "Rows": run.get("rows", 0),
-            "Columns": run.get("columns", 0),
-            "Duplicate rows": run.get("duplicate_rows", 0),
-            "Missing cells": run.get("missing_cells", 0),
-            "Overall missing %": run.get("overall_missing_percent", 0),
-            "Memory MB": run.get("memory_mb", 0),
+            "Profiled at": pd.to_datetime(run.get("profiled_at"), utc=True, errors="coerce"),
+            "Rows": int(run.get("rows", 0)),
+            "Columns": int(run.get("columns", 0)),
+            "Duplicate rows": int(run.get("duplicate_rows", 0)),
+            "Missing cells": int(run.get("missing_cells", 0)),
+            "Overall missing %": float(run.get("overall_missing_percent", 0)),
+            "Memory MB": float(run.get("memory_mb", 0)),
         }
         for run in runs
     ]
-    return pd.DataFrame(rows).sort_values("Profiled at") if rows else pd.DataFrame()
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        return frame
+    return frame.dropna(subset=["Profiled at"]).sort_values("Profiled at")
 
 
 def update_ai_summary(workspace: dict[str, Any], run_id: str, summary: str) -> None:
@@ -226,8 +286,29 @@ def update_ai_summary(workspace: dict[str, Any], run_id: str, summary: str) -> N
         workspace["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def monitor_alerts(workspace: dict[str, Any], missing_threshold: float = 5.0) -> list[dict[str, Any]]:
+    alerts: list[dict[str, Any]] = []
+    for dataset in workspace.get("datasets", []):
+        runs = dataset_runs(workspace, dataset.get("id", ""))
+        if not runs:
+            alerts.append({"Severity": "Info", "Dataset": dataset.get("name"), "Observation": "Registered but never profiled", "Destination": "Profile"})
+            continue
+        current = runs[-1]
+        if float(current.get("overall_missing_percent", 0)) >= missing_threshold:
+            alerts.append({"Severity": "Review", "Dataset": dataset.get("name"), "Observation": f"Overall missing is {float(current.get('overall_missing_percent', 0)):.2f}% (threshold {missing_threshold:.0f}%)", "Destination": "Report viewer"})
+        if int(current.get("duplicate_rows", 0)) > 0:
+            alerts.append({"Severity": "Review", "Dataset": dataset.get("name"), "Observation": f"{int(current.get('duplicate_rows', 0)):,} duplicate rows detected", "Destination": "Report viewer"})
+        if len(runs) >= 2:
+            changes = compare_runs(runs[-2], runs[-1])
+            if changes["added_columns"] or changes["removed_columns"] or changes["dtype_changes"]:
+                alerts.append({"Severity": "Change", "Dataset": dataset.get("name"), "Observation": "Schema changed since the previous run", "Destination": "Compare"})
+            if changes["summary"]["Rows"] != 0:
+                alerts.append({"Severity": "Change", "Dataset": dataset.get("name"), "Observation": f"Row count changed by {changes['summary']['Rows']:+,}", "Destination": "Compare"})
+    return alerts
+
+
 def workspace_to_json(workspace: dict[str, Any]) -> str:
-    return json.dumps(workspace, ensure_ascii=False, separators=(",", ":"))
+    return json.dumps(workspace, ensure_ascii=False, separators=(",", ":"), default=str)
 
 
 def workspace_from_json(value: str) -> dict[str, Any]:
@@ -239,6 +320,12 @@ def workspace_from_json(value: str) -> dict[str, Any]:
     parsed.setdefault("version", DATA_VERSION)
     parsed.setdefault("datasets", [])
     parsed.setdefault("runs", [])
+    parsed.setdefault("failures", [])
+    for run in parsed["runs"]:
+        run.setdefault("status", "success")
+        run.setdefault("correlation_profile", [])
+        run.setdefault("column_renames", [])
+    parsed["version"] = DATA_VERSION
     return parsed
 
 
@@ -261,10 +348,7 @@ def _write_table(ws, rows: list[dict[str, Any]], start_row: int = 4) -> None:
                 cell.fill = STRIPE_FILL
     from openpyxl.utils import get_column_letter
     for index in range(1, ws.max_column + 1):
-        width = max(
-            (len(str(ws.cell(row=row, column=index).value)) for row in range(1, ws.max_row + 1) if ws.cell(row=row, column=index).value is not None),
-            default=8,
-        )
+        width = max((len(str(ws.cell(row=row, column=index).value)) for row in range(1, ws.max_row + 1) if ws.cell(row=row, column=index).value is not None), default=8)
         ws.column_dimensions[get_column_letter(index)].width = min(width + 2, 42)
 
 
@@ -293,17 +377,20 @@ def snapshot_report_bytes(snapshot: dict[str, Any]) -> bytes:
         {"Metric": "Missing cells", "Value": snapshot.get("missing_cells")},
         {"Metric": "Overall missing %", "Value": snapshot.get("overall_missing_percent")},
         {"Metric": "Memory MB", "Value": snapshot.get("memory_mb")},
+        {"Metric": "Generated with", "Value": "Data Profiling Manager by Aanchal Dahiya"},
     ]
     _title(overview_sheet, "Data Profiling Snapshot", "Recreated from saved aggregate profiling metrics", 2)
     _write_table(overview_sheet, overview_rows)
-    basic = snapshot.get("basic_profile", [])
-    basic_sheet = workbook.create_sheet("Basic Profile")
-    _title(basic_sheet, "Basic Profile", "Saved profiling snapshot", len(basic[0]) if basic else 1)
-    _write_table(basic_sheet, basic)
-    advanced = snapshot.get("advanced_profile", [])
-    advanced_sheet = workbook.create_sheet("Advanced Profile")
-    _title(advanced_sheet, "Advanced Profile", "Saved profiling snapshot", len(advanced[0]) if advanced else 1)
-    _write_table(advanced_sheet, advanced)
+    for sheet_name, title, rows in [
+        ("Basic Profile", "Basic Profile", snapshot.get("basic_profile", [])),
+        ("Advanced Profile", "Advanced Profile", snapshot.get("advanced_profile", [])),
+        ("Correlation Matrix", "Correlation Matrix", snapshot.get("correlation_profile", [])),
+    ]:
+        if sheet_name == "Correlation Matrix" and not rows:
+            continue
+        sheet = workbook.create_sheet(sheet_name)
+        _title(sheet, title, "Saved profiling snapshot", len(rows[0]) if rows else 1)
+        _write_table(sheet, rows)
     if snapshot.get("ai_summary"):
         ai_sheet = workbook.create_sheet("AI Explanation")
         _title(ai_sheet, "Gemini Explanation", "Generated from aggregate profiling metrics", 1)
