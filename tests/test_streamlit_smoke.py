@@ -57,8 +57,7 @@ class StreamlitSmokeTests(unittest.TestCase):
     @staticmethod
     def assert_sidebar_menu(test_case, app, pages):
         labels = [button.label for button in app.sidebar.button]
-        test_case.assertEqual(labels[: len(pages)], pages)
-        test_case.assertEqual(len(labels), len(pages))
+        test_case.assertEqual(labels, pages)
 
     def test_every_hosted_page_renders_without_exception(self):
         workspace = self.populated_workspace()
@@ -88,9 +87,8 @@ class StreamlitSmokeTests(unittest.TestCase):
                     app.session_state["_requested_page"] = page
                     app.run(timeout=30)
                     self.assertEqual(len(app.exception), 0, [exception.message for exception in app.exception])
+                    self.assertEqual(app.session_state["page"], page)
                     self.assert_sidebar_menu(self, app, pages)
-                    active = next(button for button in app.sidebar.button if button.label == page)
-                    self.assertEqual(active.type, "primary")
 
     def test_every_local_page_renders_without_exception(self):
         workspace = self.populated_workspace()
@@ -138,9 +136,8 @@ class StreamlitSmokeTests(unittest.TestCase):
                     app.session_state["_requested_page"] = page
                     app.run(timeout=30)
                     self.assertEqual(len(app.exception), 0, [exception.message for exception in app.exception])
+                    self.assertEqual(app.session_state["page"], page)
                     self.assert_sidebar_menu(self, app, pages)
-                    active = next(button for button in app.sidebar.button if button.label == page)
-                    self.assertEqual(active.type, "primary")
 
 
 if __name__ == "__main__":
