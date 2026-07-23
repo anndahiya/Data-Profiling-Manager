@@ -79,7 +79,7 @@ class StreamlitSmokeTests(unittest.TestCase):
             self.assertEqual(len(app.exception), 0, [exception.message for exception in app.exception])
             for page in pages[1:]:
                 with self.subTest(page=page):
-                    app.radio[0].set_value(page)
+                    app.sidebar.radio[0].set_value(page)
                     app.run(timeout=30)
                     self.assertEqual(len(app.exception), 0, [exception.message for exception in app.exception])
 
@@ -126,7 +126,7 @@ class StreamlitSmokeTests(unittest.TestCase):
             self.assertEqual(len(app.exception), 0, [exception.message for exception in app.exception])
             for page in pages[1:]:
                 with self.subTest(page=page):
-                    app.radio[0].set_value(page)
+                    app.sidebar.radio[0].set_value(page)
                     app.run(timeout=30)
                     self.assertEqual(len(app.exception), 0, [exception.message for exception in app.exception])
 
