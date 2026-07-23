@@ -83,6 +83,13 @@ export async function parseFile(file: File): Promise<{ rows: DataRow[]; sourceKi
   throw new Error('This web edition currently supports CSV and .xlsx files. Use the local Python edition for .xls and Parquet.');
 }
 
+function isDateShaped(text: string): boolean {
+  const numericDate = /^(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4})(?:[ T].*)?$/;
+  const isoTimestamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?$/i;
+  const namedMonth = /^(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},?\s+\d{4}(?:\s+.*)?$/i;
+  return (numericDate.test(text) || isoTimestamp.test(text) || namedMonth.test(text)) && !Number.isNaN(Date.parse(text));
+}
+
 function inferValueType(value: unknown): DataType {
   if (isNullLike(value)) return 'empty';
   if (typeof value === 'boolean') return 'boolean';
@@ -92,8 +99,7 @@ function inferValueType(value: unknown): DataType {
   if (/^(true|false|yes|no)$/i.test(text)) return 'boolean';
   if (/^-?\d+$/.test(text)) return 'integer';
   if (/^-?(?:\d+\.\d+|\d+e[+-]?\d+)$/i.test(text)) return 'decimal';
-  const timestamp = Date.parse(text);
-  if (!Number.isNaN(timestamp) && /[-/:T]/.test(text)) return 'date';
+  if (isDateShaped(text)) return 'date';
   return 'text';
 }
 
