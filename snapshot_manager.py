@@ -20,6 +20,7 @@ MAX_RUNS_PER_DATASET = 30
 MAX_TOTAL_RUNS = 150
 MAX_FAILURES = 100
 MAX_BROWSER_DATA_BYTES = 4_000_000
+FORMULA_PREFIXES = ("=", "+", "-", "@")
 
 HEADER_FILL = PatternFill("solid", fgColor="6C72CB")
 TITLE_FILL = PatternFill("solid", fgColor="2D2A6E")
@@ -65,6 +66,13 @@ def _safe(value: Any) -> Any:
     if isinstance(value, (str, int, float, bool)):
         return value
     return str(value)
+
+
+def _excel_safe(value: Any) -> Any:
+    value = _safe(value)
+    if isinstance(value, str) and value.lstrip().startswith(FORMULA_PREFIXES):
+        return f"'{value}"
+    return value
 
 
 def _records(frame: pd.DataFrame | None) -> list[dict[str, Any]]:
@@ -335,32 +343,35 @@ def _write_table(ws, rows: list[dict[str, Any]], start_row: int = 4) -> None:
         return
     columns = list(rows[0].keys())
     for index, column in enumerate(columns, 1):
-        cell = ws.cell(row=start_row, column=index, value=column)
+        cell = ws.cell(row=start_row, column=index, value=_excel_safe(str(column)))
         cell.fill = HEADER_FILL
         cell.font = HEADER_FONT
         cell.alignment = Alignment(horizontal="center")
         cell.border = BORDER
     for row_index, row in enumerate(rows, start_row + 1):
         for column_index, column in enumerate(columns, 1):
-            cell = ws.cell(row=row_index, column=column_index, value=_safe(row.get(column)))
+            cell = ws.cell(row=row_index, column=column_index, value=_excel_safe(row.get(column)))
             cell.border = BORDER
             if (row_index - start_row) % 2 == 0:
                 cell.fill = STRIPE_FILL
     from openpyxl.utils import get_column_letter
     for index in range(1, ws.max_column + 1):
-        width = max((len(str(ws.cell(row=row, column=index).value)) for row in range(1, ws.max_row + 1) if ws.cell(row=row, column=index).value is not None), default=8)
+        width = max(
+            (len(str(ws.cell(row=row, column=index).value)) for row in range(1, ws.max_row + 1) if ws.cell(row=row, column=index).value is not None),
+            default=8,
+        )
         ws.column_dimensions[get_column_letter(index)].width = min(width + 2, 42)
 
 
 def _title(ws, title: str, subtitle: str, ncols: int) -> None:
     ncols = max(1, ncols)
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncols)
-    cell = ws.cell(row=1, column=1, value=title)
+    cell = ws.cell(row=1, column=1, value=_excel_safe(title))
     cell.fill = TITLE_FILL
     cell.font = TITLE_FONT
     cell.alignment = Alignment(horizontal="left", indent=1)
     ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=ncols)
-    ws.cell(row=2, column=1, value=subtitle)
+    ws.cell(row=2, column=1, value=_excel_safe(subtitle))
 
 
 def snapshot_report_bytes(snapshot: dict[str, Any]) -> bytes:
@@ -394,7 +405,7 @@ def snapshot_report_bytes(snapshot: dict[str, Any]) -> bytes:
     if snapshot.get("ai_summary"):
         ai_sheet = workbook.create_sheet("AI Explanation")
         _title(ai_sheet, "Gemini Explanation", "Generated from aggregate profiling metrics", 1)
-        ai_sheet.cell(row=4, column=1, value=snapshot["ai_summary"])
+        ai_sheet.cell(row=4, column=1, value=_excel_safe(snapshot["ai_summary"]))
         ai_sheet.cell(row=4, column=1).alignment = Alignment(wrap_text=True, vertical="top")
         ai_sheet.column_dimensions["A"].width = 110
         ai_sheet.row_dimensions[4].height = 300
