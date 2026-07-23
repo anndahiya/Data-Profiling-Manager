@@ -1,0 +1,23 @@
+.linked-source-card {
+  min-height: 104px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 13px;
+  margin-top: 14px;
+  padding: 16px;
+  color: #4e50a5;
+  background: #fafaff;
+  border: 1px solid #dfe1f2;
+  border-radius: 11px;
+}
+.linked-source-card > div { min-width: 0; }
+.linked-source-card strong, .linked-source-card span { display: block; }
+.linked-source-card strong { overflow: hidden; color: #303347; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.linked-source-card span { margin-top: 4px; color: #7d8395; font-size: 9px; line-height: 1.45; }
+.field small { color: #8a90a2; font-size: 8px; line-height: 1.4; }
+.alert.warning { color: #8f5b0b; background: #fff7e8; border: 1px solid #f1dfb9; }
+@media (max-width: 720px) {
+  .linked-source-card { grid-template-columns: auto minmax(0, 1fr); }
+  .linked-source-card .secondary-button { grid-column: 1 / -1; width: 100%; }
+}
