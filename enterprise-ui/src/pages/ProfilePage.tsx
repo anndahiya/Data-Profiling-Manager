@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { PageHeader } from '../components';
 import { db } from '../db';
 import { compareSchema, createIssues, parseFile, profileRows } from '../profiler';
+import { createQualityIssues, evaluateConfiguredQuality } from '../quality';
 import { SourcePicker } from '../SourcePicker';
 import { pickLinkedDirectory, pickLinkedFile, resolveLinkedSource, supportsPersistentFileAccess } from '../sources';
 import type { Dataset, DatasetSource, LinkedSourceHandle, ProfileRun, SchemaDiff, SourceMode, WorkspaceSnapshot } from '../types';
@@ -60,11 +61,12 @@ export function ProfilePage({ workspace, reload }: { workspace: WorkspaceSnapsho
 
   const commitRun = async (run: ProfileRun, dataset: Dataset, handle?: LinkedSourceHandle) => {
     const previous = latestRunFor(dataset.id, workspace.runs);
-    const issues = createIssues(dataset, run, previous).map((issue) => issue.metric === 'Timeliness' ? { ...issue, category: 'Freshness' as const, title: 'Freshness baseline failed', description: `${issue.description} The browser baseline treats values older than 30 days as stale until a governed freshness policy is configured.` } : issue);
+    const observabilityIssues = createIssues(dataset, run, previous).filter((issue) => issue.category !== 'Data quality');
+    const qualityIssues = createQualityIssues(dataset.id, run.id, run.createdAt, run.quality);
     await db.transaction('rw', db.datasets, db.runs, db.issues, db.sourceHandles, async () => {
       await db.datasets.put({ ...dataset, latestRunId: run.id, updatedAt: run.createdAt });
       await db.runs.put(run);
-      if (issues.length) await db.issues.bulkPut(issues);
+      if (observabilityIssues.length || qualityIssues.length) await db.issues.bulkPut([...observabilityIssues, ...qualityIssues]);
       if (handle) await db.sourceHandles.put({ ...handle, datasetId: dataset.id, updatedAt: run.createdAt });
       else if (dataset.source?.mode === 'manual-upload') await db.sourceHandles.delete(dataset.id);
     });
@@ -109,7 +111,13 @@ export function ProfilePage({ workspace, reload }: { workspace: WorkspaceSnapsho
         storedHandle = { ...linkedHandle, datasetId: targetId };
       }
       const parsed = await parseFile(selectedFile);
-      const run = { ...profileRows(parsed.rows, targetId, selectedFile.name, sourceKind), sourceReference };
+      const baseRun = profileRows(parsed.rows, targetId, selectedFile.name, sourceKind);
+      const configuredRules = workspace.rules.filter((rule) => rule.datasetId === targetId);
+      const run: ProfileRun = {
+        ...baseRun,
+        sourceReference,
+        quality: evaluateConfiguredQuality(parsed.rows, baseRun.columns, configuredRules, workspace.dimensions),
+      };
       const diff = compareSchema(selectedDataset ? latestRunFor(selectedDataset.id, workspace.runs) : undefined, run.columns);
       if (selectedDataset && diff.hasChanges) setPending({ run, diff, existing: selectedDataset, source, handle: storedHandle });
       else {
@@ -130,6 +138,7 @@ export function ProfilePage({ workspace, reload }: { workspace: WorkspaceSnapsho
   };
 
   const canRun = Boolean(name.trim() && (sourceMode === 'manual-upload' ? file : linkedHandle));
+  const configuredRuleCount = selectedDataset ? workspace.rules.filter((rule) => rule.datasetId === selectedDataset.id && rule.enabled).length : 0;
   return <>
     <PageHeader title="Profile data" description="Upload once, link a file, or link a versioned folder so future runs can reuse the same source." />
     {error && <div className="alert error"><AlertTriangle size={17} />{error}</div>}
@@ -137,7 +146,7 @@ export function ProfilePage({ workspace, reload }: { workspace: WorkspaceSnapsho
       <section className="panel form-panel"><div className="step-label"><span>1</span> Select destination</div><label className="field"><span>Data asset</span><select value={datasetId} onChange={(event) => setDatasetId(event.target.value)}><option value="new">Create a new asset</option>{workspace.datasets.map((dataset) => <option value={dataset.id} key={dataset.id}>{dataset.name}</option>)}</select></label><div className="field-grid"><label className="field"><span>Asset name</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Customer master" /></label><label className="field"><span>Owner / steward</span><input value={owner} onChange={(event) => setOwner(event.target.value)} placeholder="Customer Data Office" /></label></div><label className="field"><span>Description</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What this dataset contains and where it is used" /></label></section>
       <SourcePicker sourceMode={sourceMode} setSourceMode={(value) => { setSourceMode(value); setError(''); }} file={file} setFile={setFile} sourceLabel={sourceLabel} filePattern={filePattern} setFilePattern={setFilePattern} selectionStrategy={selectionStrategy} setSelectionStrategy={setSelectionStrategy} persistentAccessSupported={supportsPersistentFileAccess()} linking={linking} chooseLinkedFile={() => void chooseFile()} chooseLinkedFolder={() => void chooseFolder()} />
     </div>
-    <div className="sticky-action"><div><strong>{sourceMode === 'manual-upload' ? 'Ready to profile?' : 'Ready to refresh this asset?'}</strong><span>{sourceMode === 'linked-folder' ? `The app will select the ${selectionStrategy === 'latest-modified' ? 'most recently modified' : 'highest-version'} file matching ${filePattern || '*'}.` : sourceMode === 'linked-file' ? 'The app will read the latest saved contents of the linked file.' : 'The system will infer datatypes, profile columns, evaluate starter rules, and check for schema changes.'}</span></div><button className="primary-button" disabled={!canRun || processing} onClick={() => void handleProfile()}>{processing ? <RefreshCw className="spin" size={17} /> : <Sparkles size={17} />} {processing ? 'Profiling…' : sourceMode === 'manual-upload' ? 'Run profile & DQ evaluation' : 'Run latest from linked source'}</button></div>
+    <div className="sticky-action"><div><strong>{sourceMode === 'manual-upload' ? 'Ready to profile?' : 'Ready to refresh this asset?'}</strong><span>{sourceMode === 'linked-folder' ? `The app will select the ${selectionStrategy === 'latest-modified' ? 'most recently modified' : 'highest-version'} file matching ${filePattern || '*'}.` : sourceMode === 'linked-file' ? 'The app will read the latest saved contents of the linked file.' : configuredRuleCount ? `${configuredRuleCount} governed rules will be evaluated.` : 'Profiling-based baseline rules will be used until you create governed rules for this asset.'}</span></div><button className="primary-button" disabled={!canRun || processing} onClick={() => void handleProfile()}>{processing ? <RefreshCw className="spin" size={17} /> : <Sparkles size={17} />} {processing ? 'Profiling…' : sourceMode === 'manual-upload' ? 'Run profile & DQ evaluation' : 'Run latest from linked source'}</button></div>
     {pending && <SchemaDialog diff={pending.diff} onCancel={() => setPending(null)} onContinue={() => void commitRun(pending.run, { ...pending.existing!, source: pending.source }, pending.handle)} onSaveNew={() => void saveAsNew()} />}
   </>;
 }
