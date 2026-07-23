@@ -2,83 +2,89 @@
 
 **Profile. Monitor. Compare.**
 
-Data Profiling Manager is an open-source Streamlit application for profiling CSV, Excel, and Parquet datasets, generating downloadable Excel reports, and optionally explaining aggregate results with Gemini.
+Data Profiling Manager is a free, open-source application for profiling CSV, Excel, and Parquet files without writing code. It keeps the product focused on factual profiling: schema, completeness, uniqueness, duplicates, distributions, outliers, patterns, history, comparisons, and trends. It does **not** calculate a data quality score.
 
-The interface and Excel reports use the same deep-indigo and periwinkle visual system. The dashboard cards are real navigation controls, not decorative links.
+## Use the hosted app
 
-The repository includes two entry points so the hosted version stays safe for multiple visitors without stripping out the full local workflow.
+Open **https://data-profiling-manager.streamlit.app**.
 
-## 1. Public hosted app — `app.py`
+The hosted app supports:
 
-Use this entry point on Streamlit Community Cloud.
+- multiple named datasets
+- saved profiling runs that survive browser refreshes
+- dashboard cards and charts for each saved run
+- historical run selection and snapshot report downloads
+- side-by-side run comparison
+- row, column, missing-value, duplicate, and memory trends
+- optional Gemini explanations using the visitor's own API key
+- recurring schedule and email configuration
+- browser-data backup and restore
+- import of snapshots created by the scheduled runner
 
-- branded dashboard and profiling interface
-- CSV, Excel, and Parquet upload
-- basic and advanced profiling
-- correlation analysis
-- downloadable Excel report
-- optional Gemini explanation using the visitor's own API key
-- scheduling and email configuration generator
-- no shared Gemini key
-- no intentional cross-user dataset history
+### How hosted persistence works
 
-The hosted site cannot retain a temporary browser upload and profile it again after the visitor leaves. Its Scheduling & email page generates the configuration and workflow needed by a durable runner.
+The hosted app stores the dataset registry and **aggregate profiling snapshots in the visitor's browser local storage**. This keeps one visitor's history separate from other visitors and allows saved results to survive a page refresh.
 
-## 2. Full local manager — `local_app.py`
+The app does not put raw uploaded rows into browser history. Raw files are processed in the active Streamlit session. Saved snapshots exclude sample values, top values, and min/max values. The browser edition retains up to 30 runs per dataset and 150 runs total, trimming older runs if the saved data approaches 4 MB.
 
-Use this edition for private data and recurring work.
+Browser history does not automatically sync to another browser, device, private browsing session, or cleared browser profile. Use **Settings & backup** to download a JSON backup.
 
-- register datasets once using local paths or accessible URLs
-- edit and delete saved datasets
-- run profiles without selecting the file again
-- keep local run history and generated reports
-- configure cadence and report recipients per dataset
-- generate `schedule_config.csv` and GitHub Actions YAML
-- back up the local registry, history, and reports
+> Do not upload confidential, regulated, or highly sensitive data to a public hosted instance. Use the local edition when files must remain on the computer running the app.
 
-All local state is stored under `.profiling_manager/` on the machine running the app.
+## Dashboard, History, Compare, and Trends
 
-## Run the hosted-style app locally
+Every saved profile is a separate run. Uploading another source does not replace earlier datasets or runs.
+
+- **Dashboard** shows the selected dataset/run, row and column counts, missingness, duplicates, missing-by-column chart, IQR outliers, saved Gemini explanation, factual observations, and changes from the prior run.
+- **History** lists all saved runs and recreates a downloadable Excel snapshot from stored metrics.
+- **Compare** detects added and removed columns, datatype changes, row and duplicate changes, missing-value changes, and unique-count changes.
+- **Trends** charts factual profiling metrics over time.
+
+## Gemini
+
+Gemini is optional. The user enters a Gemini API key in a masked field. It is their Gemini credential, not a password for Data Profiling Manager.
+
+Only aggregate profiling metrics are sent to Gemini. The underlying uploaded rows and sample values are not included. Saved AI explanations are attached to the selected profiling run in browser history.
+
+## Run locally
+
+The local edition stores dataset paths, reports, history, comparisons, trends, AI explanations, and schedule settings under `.profiling_manager/` on the computer running the app.
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-streamlit run app.py
-```
-
-## Run the full local manager
-
-```bash
 streamlit run local_app.py
 ```
 
-## Deploy on Streamlit Community Cloud
+Use the hosted-style entry point locally with:
 
-- Repository: `https://github.com/anndahiya/Data-Profiling-Manager`
-- Branch: `main`
-- Main file path: `app.py`
+```bash
+streamlit run app.py
+```
 
-## Gemini behavior
+## Scheduled profiling and email reports
 
-Gemini is optional. The user enters their Gemini API key in a masked field. It is their Gemini credential, not a password for Data Profiling Manager. The application sends aggregate profiling metrics only—not raw rows or sample values.
+The Scheduling screen saves settings per dataset and generates:
 
-## Scheduled email reports
+- `schedule_config.csv`
+- a GitHub Actions workflow with all configured cron schedules
 
-The app generates `schedule_config.csv`. The runner in `monthly_profiling_agent.py`:
+The runner in `monthly_profiling_agent.py`:
 
 1. reads the matching schedule rows
-2. profiles the configured dataset source
+2. profiles CSV, Excel, or Parquet sources
 3. creates the Excel report
 4. optionally generates a Gemini explanation
-5. emails the workbook through the user's SMTP account
-6. records the result in `run_log.jsonl`
+5. emails the report through the user's SMTP account
+6. writes `run_log.jsonl`
+7. writes `profiling_history.jsonl` snapshots for History, Compare, and Trends
 
-Examples:
+Commands:
 
 ```bash
 python monthly_profiling_agent.py --all
-python monthly_profiling_agent.py --cron "15 7 1 * *"
+python monthly_profiling_agent.py --cron "0 7 1 * *"
 python monthly_profiling_agent.py --dataset customer-master
 ```
 
@@ -98,18 +104,35 @@ GEMINI_API_KEY
 GEMINI_MODEL
 ```
 
-For private files stored on a personal computer, use cron or Windows Task Scheduler on that computer. A GitHub-hosted runner cannot read a laptop's local file path.
+A public Streamlit upload is temporary and cannot be reused by a future scheduled job. The scheduled runner needs a durable downloadable URL or a file path it can access. For files stored on a personal computer, run the local edition and use cron or Windows Task Scheduler. A GitHub-hosted runner cannot read a laptop's local file path.
+
+GitHub Actions uploads generated reports, logs, and `profiling_history.jsonl` as a workflow artifact. Import that JSONL file from **Settings & backup** in the hosted app to add scheduled runs to browser History, Compare, and Trends.
+
+## Deploy on Streamlit Community Cloud
+
+- Repository: `https://github.com/anndahiya/Data-Profiling-Manager`
+- Branch: `main`
+- Main file path: `app.py`
 
 ## Main files
 
-- `app.py` — public hosted interface
+- `app.py` — hosted app with browser-persistent datasets and profiling history
+- `browser_storage.py` — browser local-storage bridge
+- `snapshot_manager.py` — saved run, comparison, trend, retention, and snapshot-report logic
 - `local_app.py` — full local manager
-- `data_profiler.py` — deterministic profiling and Excel report generation
+- `data_profiler.py` — deterministic profiling and full Excel report generation
 - `ai_helper.py` — aggregate-only Gemini integration
 - `schedule_helper.py` — schedule configuration and workflow generation
-- `monthly_profiling_agent.py` — scheduled profiling and email runner
-- `schedule_config.example.csv` — configuration example
+- `monthly_profiling_agent.py` — scheduled profiling, email, logging, and history snapshots
+- `schedule_config.example.csv` — scheduling example
+- `tests/` — regression tests for saved runs, comparison, privacy fields, and report export
+
+## Tests
+
+```bash
+python -m unittest discover -s tests -v
+```
 
 ## License
 
-MIT License.
+MIT License. See [LICENSE](LICENSE).
