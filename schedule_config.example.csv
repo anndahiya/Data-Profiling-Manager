@@ -1,0 +1,2 @@
+dataset_id,dataset,source,recipient_name,recipient_email,cadence,weekday,day_of_month,month,hour_utc,minute,ai_summary,cron
+customer-master,Customer Master,/path/to/customer_master.csv,Alex,alex@example.com,Monthly,Monday,1,1,7,15,true,15 7 1 * *
