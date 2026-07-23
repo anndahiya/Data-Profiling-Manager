@@ -1,8 +1,10 @@
 export type DataType = 'integer' | 'decimal' | 'date' | 'boolean' | 'text' | 'empty';
-export type Dimension = 'Completeness' | 'Validity' | 'Uniqueness' | 'Consistency' | 'Timeliness';
+export type Dimension = string;
 export type IssueCategory = 'Data quality' | 'Schema change' | 'Record volume' | 'Anomaly' | 'Freshness';
 export type IssueStatus = 'Open' | 'Acknowledged' | 'Resolved' | 'Closed';
 export type SourceMode = 'manual-upload' | 'linked-file' | 'linked-folder' | 'database';
+export type RuleSeverity = 'Critical' | 'High' | 'Medium' | 'Low' | 'Info';
+export type RuleType = 'not-null' | 'unique' | 'type' | 'pattern' | 'freshness' | 'range' | 'allowed-values' | 'min-length' | 'max-length';
 
 export interface DatasetSource {
   mode: SourceMode;
@@ -61,12 +63,29 @@ export interface ColumnProfile {
   numericStats?: NumericStats;
 }
 
+export interface RuleResult {
+  ruleId: string;
+  ruleName: string;
+  dimension: Dimension;
+  passingRecords: number;
+  failingRecords: number;
+  score: number;
+  weight: number;
+  threshold: number;
+  severity: RuleSeverity;
+}
+
 export interface DimensionResult {
   dimension: Dimension;
   passingRecords: number;
   failingRecords: number;
   score: number;
   activeRules: number;
+  weight?: number;
+  threshold?: number;
+  passingChecks?: number;
+  failingChecks?: number;
+  evaluatedChecks?: number;
 }
 
 export interface QualitySummary {
@@ -76,6 +95,20 @@ export interface QualitySummary {
   overallScore: number;
   dimensions: DimensionResult[];
   rulesEvaluated: number;
+  recordComplianceScore?: number;
+  ruleResults?: RuleResult[];
+  scoringMethod?: 'weighted-rule-average' | 'record-pass-all';
+}
+
+export interface QualityDimension {
+  id: string;
+  name: string;
+  description: string;
+  weight: number;
+  enabled: boolean;
+  source: 'Standard' | 'Library' | 'User';
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface Dataset {
@@ -120,11 +153,17 @@ export interface QualityRule {
   name: string;
   dimension: Dimension;
   columnName: string;
-  ruleType: 'not-null' | 'unique' | 'type' | 'pattern' | 'freshness';
+  ruleType: RuleType;
   expectedValue?: string;
+  secondaryValue?: string;
   enabled: boolean;
   source: 'Suggested' | 'User';
+  weight?: number;
+  threshold?: number;
+  severity?: RuleSeverity;
+  notes?: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface Issue {
@@ -132,7 +171,7 @@ export interface Issue {
   datasetId: string;
   runId: string;
   category: IssueCategory;
-  severity: 'Critical' | 'High' | 'Medium' | 'Low' | 'Info';
+  severity: RuleSeverity;
   status: IssueStatus;
   title: string;
   description: string;
@@ -147,4 +186,5 @@ export interface WorkspaceSnapshot {
   runs: ProfileRun[];
   issues: Issue[];
   rules: QualityRule[];
+  dimensions?: QualityDimension[];
 }
