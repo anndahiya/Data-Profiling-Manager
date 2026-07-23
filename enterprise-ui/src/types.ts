@@ -2,6 +2,23 @@ export type DataType = 'integer' | 'decimal' | 'date' | 'boolean' | 'text' | 'em
 export type Dimension = 'Completeness' | 'Validity' | 'Uniqueness' | 'Consistency' | 'Timeliness';
 export type IssueCategory = 'Data quality' | 'Schema change' | 'Record volume' | 'Anomaly' | 'Freshness';
 export type IssueStatus = 'Open' | 'Acknowledged' | 'Resolved' | 'Closed';
+export type SourceMode = 'manual-upload' | 'linked-file' | 'linked-folder' | 'database';
+
+export interface DatasetSource {
+  mode: SourceMode;
+  displayName?: string;
+  filePattern?: string;
+  selectionStrategy?: 'latest-modified' | 'highest-filename';
+  connectorType?: 'DB2' | 'PostgreSQL' | 'Snowflake' | 'Supabase';
+}
+
+export interface LinkedSourceHandle {
+  datasetId: string;
+  kind: 'file' | 'directory';
+  handle: any;
+  displayName: string;
+  updatedAt: string;
+}
 
 export interface TopValue {
   value: string;
@@ -70,6 +87,7 @@ export interface Dataset {
   createdAt: string;
   updatedAt: string;
   latestRunId?: string;
+  source?: DatasetSource;
 }
 
 export interface ProfileRun {
@@ -85,7 +103,8 @@ export interface ProfileRun {
   schemaFingerprint: string;
   columns: ColumnProfile[];
   quality: QualitySummary;
-  sourceKind: 'CSV' | 'Excel' | 'Demo';
+  sourceKind: 'CSV' | 'Excel' | 'Demo' | 'Linked file' | 'Linked folder' | 'Database';
+  sourceReference?: string;
 }
 
 export interface SchemaDiff {
