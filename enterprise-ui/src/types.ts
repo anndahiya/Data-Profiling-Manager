@@ -3,6 +3,7 @@ export type Dimension = string;
 export type IssueCategory = 'Data quality' | 'Schema change' | 'Record volume' | 'Anomaly' | 'Freshness';
 export type IssueStatus = 'Open' | 'Acknowledged' | 'Resolved' | 'Closed';
 export type SourceMode = 'manual-upload' | 'linked-file' | 'linked-folder' | 'database';
+export type DatabaseProvider = 'DB2' | 'PostgreSQL' | 'Snowflake' | 'Supabase';
 export type RuleSeverity = 'Critical' | 'High' | 'Medium' | 'Low' | 'Info';
 export type RuleType = 'not-null' | 'unique' | 'type' | 'pattern' | 'freshness' | 'range' | 'allowed-values' | 'min-length' | 'max-length';
 export type ScheduleCadence = 'Weekly' | 'Monthly' | 'Quarterly' | 'Yearly';
@@ -13,7 +14,29 @@ export interface DatasetSource {
   displayName?: string;
   filePattern?: string;
   selectionStrategy?: 'latest-modified' | 'highest-filename';
-  connectorType?: 'DB2' | 'PostgreSQL' | 'Snowflake' | 'Supabase';
+  connectorType?: DatabaseProvider;
+  connectionId?: string;
+}
+
+export interface DatabaseConnection {
+  id: string;
+  datasetId: string;
+  name: string;
+  provider: DatabaseProvider;
+  host: string;
+  port: number;
+  database: string;
+  schema?: string;
+  account?: string;
+  warehouse?: string;
+  role?: string;
+  sslMode?: 'require' | 'prefer' | 'disable';
+  secretPrefix: string;
+  query: string;
+  maxRows: number;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface LinkedSourceHandle {
@@ -24,27 +47,9 @@ export interface LinkedSourceHandle {
   updatedAt: string;
 }
 
-export interface TopValue {
-  value: string;
-  count: number;
-  percentage: number;
-}
-
-export interface PatternValue {
-  pattern: string;
-  count: number;
-  percentage: number;
-}
-
-export interface NumericStats {
-  min: number;
-  max: number;
-  mean: number;
-  median: number;
-  standardDeviation: number;
-  q1: number;
-  q3: number;
-}
+export interface TopValue { value: string; count: number; percentage: number; }
+export interface PatternValue { pattern: string; count: number; percentage: number; }
+export interface NumericStats { min: number; max: number; mean: number; median: number; standardDeviation: number; q1: number; q3: number; }
 
 export interface ColumnProfile {
   name: string;
@@ -217,4 +222,5 @@ export interface WorkspaceSnapshot {
   rules: QualityRule[];
   dimensions?: QualityDimension[];
   monitors?: MonitorPolicy[];
+  connections?: DatabaseConnection[];
 }
