@@ -42,38 +42,48 @@ def render_sidebar_menu(
         """
         <style>
         section[data-testid="stSidebar"] {
-            background: #FAFAFC;
+            background: #FBFBFD;
             border-right: 1px solid #E5E7EF;
         }
         section[data-testid="stSidebar"][aria-expanded="true"] {
-            width: 15.5rem;
-            min-width: 15.5rem;
-            max-width: 15.5rem;
+            width: 15rem;
+            min-width: 15rem;
+            max-width: 15rem;
         }
         section[data-testid="stSidebar"] > div:first-child {
-            padding-top: 1rem;
+            padding-top: 0.9rem;
         }
         section[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] {
-            gap: 0.22rem;
+            gap: 0.08rem;
         }
         section[data-testid="stSidebar"] div[data-testid="stButton"] {
             margin: 0;
         }
         section[data-testid="stSidebar"] div[data-testid="stButton"] > button {
             width: 100%;
-            min-height: 2.25rem;
-            justify-content: flex-start;
-            text-align: left;
-            padding: 0.42rem 0.72rem;
-            border-radius: 0.5rem;
+            min-height: 2.15rem;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: flex-start !important;
+            padding: 0.38rem 0.72rem;
+            border-radius: 0.45rem;
             box-shadow: none;
-            font-size: 0.88rem;
+            font-size: 0.86rem;
             line-height: 1.2;
             transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
         }
-        section[data-testid="stSidebar"] div[data-testid="stButton"] > button p {
-            text-align: left;
-            width: 100%;
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button > div,
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button div[data-testid="stMarkdownContainer"] {
+            width: 100% !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: flex-start !important;
+        }
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button p,
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button span {
+            width: 100% !important;
+            margin: 0 !important;
+            text-align: left !important;
         }
         section[data-testid="stSidebar"] div[data-testid="stButton"] > button[kind="secondary"] {
             background: transparent !important;
@@ -82,14 +92,14 @@ def render_sidebar_menu(
             font-weight: 500;
         }
         section[data-testid="stSidebar"] div[data-testid="stButton"] > button[kind="secondary"]:hover {
-            background: #F0F1F8 !important;
-            border-color: #E2E4EE !important;
+            background: #F1F2F7 !important;
+            border-color: #E5E7EF !important;
             color: #2D2A6E !important;
         }
         section[data-testid="stSidebar"] div[data-testid="stButton"] > button[kind="primary"] {
-            background: #EEF0FB !important;
-            border: 1px solid #D9DDF4 !important;
-            border-left: 3px solid #5D63C7 !important;
+            background: #EFF0FC !important;
+            border: 1px solid #DCE0F6 !important;
+            border-left: 3px solid #6369D1 !important;
             color: #2D2A6E !important;
             font-weight: 700;
             padding-left: 0.62rem;
@@ -97,8 +107,8 @@ def render_sidebar_menu(
         section[data-testid="stSidebar"] .dpm-nav-brand {
             display: flex;
             align-items: center;
-            gap: 0.68rem;
-            margin: 0.1rem 0 1.05rem;
+            gap: 0.65rem;
+            margin: 0.1rem 0 0.72rem;
             padding: 0 0.15rem;
         }
         section[data-testid="stSidebar"] .dpm-nav-mark {
@@ -124,26 +134,30 @@ def render_sidebar_menu(
             display: block;
             margin-top: 0.12rem;
             color: #777C8D;
-            font-size: 0.73rem;
+            font-size: 0.72rem;
             line-height: 1.1;
         }
         section[data-testid="stSidebar"] .dpm-nav-section {
-            margin: 0.78rem 0 0.26rem;
-            padding: 0 0.68rem;
-            color: #8A8E9E;
-            font-size: 0.66rem;
-            font-weight: 750;
-            letter-spacing: 0.09em;
+            margin: 0.92rem 0 0.34rem;
+            padding: 0 0.72rem;
+            color: #858A9C;
+            font-size: 0.64rem;
+            font-weight: 760;
+            line-height: 1;
+            letter-spacing: 0.1em;
             text-transform: uppercase;
         }
+        section[data-testid="stSidebar"] .dpm-nav-section.first {
+            margin-top: 0.38rem;
+        }
         section[data-testid="stSidebar"] .dpm-nav-caption {
-            margin-top: 0.7rem;
+            margin-top: 0.65rem;
             color: #85899A;
-            font-size: 0.72rem;
+            font-size: 0.71rem;
             line-height: 1.45;
         }
         section[data-testid="stSidebar"] hr {
-            margin: 0.9rem 0 0.55rem;
+            margin: 0.9rem 0 0.5rem;
             border-color: #E1E3EC;
         }
         </style>
@@ -168,11 +182,17 @@ def render_sidebar_menu(
         )
 
         previous_section: str | None = None
+        section_index = 0
         for page in pages:
             section = SECTION_FOR_PAGE.get(page, "Menu")
             if section != previous_section:
-                st.markdown(f'<div class="dpm-nav-section">{html.escape(section)}</div>', unsafe_allow_html=True)
+                first_class = " first" if section_index == 0 else ""
+                st.markdown(
+                    f'<div class="dpm-nav-section{first_class}">{html.escape(section)}</div>',
+                    unsafe_allow_html=True,
+                )
                 previous_section = section
+                section_index += 1
 
             is_active = page == current_page
             clicked = st.button(
