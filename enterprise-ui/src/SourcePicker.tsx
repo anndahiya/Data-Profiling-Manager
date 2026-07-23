@@ -1,5 +1,6 @@
 import { AlertTriangle, File, FolderOpen, Link2, ShieldCheck, UploadCloud } from 'lucide-react';
 import type { DatasetSource, SourceMode } from './types';
+import './source.css';
 
 export function SourcePicker({
   sourceMode,
