@@ -54,6 +54,12 @@ class StreamlitSmokeTests(unittest.TestCase):
         }
         return workspace
 
+    @staticmethod
+    def assert_sidebar_menu(test_case, app, pages):
+        labels = [button.label for button in app.sidebar.button]
+        test_case.assertEqual(labels[: len(pages)], pages)
+        test_case.assertEqual(len(labels), len(pages))
+
     def test_every_hosted_page_renders_without_exception(self):
         workspace = self.populated_workspace()
         pages = [
@@ -72,16 +78,19 @@ class StreamlitSmokeTests(unittest.TestCase):
         ]
         app = AppTest.from_file("app.py")
         app.session_state["page"] = "Dashboard"
-        app.session_state["nav_page"] = "Dashboard"
         app.session_state["current_run_id"] = workspace["runs"][-1]["run_id"]
         with patch("hosted_common.initialize_workspace", return_value=(workspace, None, True)):
             app.run(timeout=30)
             self.assertEqual(len(app.exception), 0, [exception.message for exception in app.exception])
+            self.assert_sidebar_menu(self, app, pages)
             for page in pages[1:]:
                 with self.subTest(page=page):
-                    app.sidebar.radio[0].set_value(page)
+                    app.session_state["_requested_page"] = page
                     app.run(timeout=30)
                     self.assertEqual(len(app.exception), 0, [exception.message for exception in app.exception])
+                    self.assert_sidebar_menu(self, app, pages)
+                    active = next(button for button in app.sidebar.button if button.label == page)
+                    self.assertEqual(active.type, "primary")
 
     def test_every_local_page_renders_without_exception(self):
         workspace = self.populated_workspace()
@@ -113,7 +122,6 @@ class StreamlitSmokeTests(unittest.TestCase):
         ]
         app = AppTest.from_file("local_app.py")
         app.session_state["page"] = "Dashboard"
-        app.session_state["nav_page"] = "Dashboard"
         app.session_state["selected_run_id"] = workspace["runs"][-1]["run_id"]
         with (
             patch("local_common.ensure_dirs", return_value=None),
@@ -124,11 +132,15 @@ class StreamlitSmokeTests(unittest.TestCase):
         ):
             app.run(timeout=30)
             self.assertEqual(len(app.exception), 0, [exception.message for exception in app.exception])
+            self.assert_sidebar_menu(self, app, pages)
             for page in pages[1:]:
                 with self.subTest(page=page):
-                    app.sidebar.radio[0].set_value(page)
+                    app.session_state["_requested_page"] = page
                     app.run(timeout=30)
                     self.assertEqual(len(app.exception), 0, [exception.message for exception in app.exception])
+                    self.assert_sidebar_menu(self, app, pages)
+                    active = next(button for button in app.sidebar.button if button.label == page)
+                    self.assertEqual(active.type, "primary")
 
 
 if __name__ == "__main__":
