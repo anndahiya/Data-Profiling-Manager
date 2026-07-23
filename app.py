@@ -29,7 +29,7 @@ page = st.session_state["page"]
 render_sidebar_menu(
     PAGES,
     page,
-    caption="Saved history belongs to this browser profile. Use Settings to download a backup.",
+    caption="History is saved in this browser. Back it up from Settings.",
 )
 
 with st.expander("Privacy, persistence, and hosted-app limits", expanded=False):
