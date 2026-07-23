@@ -1,6 +1,8 @@
+import io
 import unittest
 
 import pandas as pd
+from openpyxl import load_workbook
 
 from snapshot_manager import (
     add_snapshot,
@@ -92,6 +94,25 @@ class SnapshotManagerTests(unittest.TestCase):
         content = snapshot_report_bytes(run)
         self.assertGreater(len(content), 1000)
         self.assertEqual(content[:2], b"PK")
+
+    def test_snapshot_report_neutralizes_formula_like_metadata(self):
+        run = create_snapshot(
+            self.first,
+            dataset_id="customer",
+            dataset_name="=HYPERLINK(\"https://example.com\")",
+            source_name="+untrusted.csv",
+        )
+        run["ai_summary"] = "@not-a-formula"
+        content = snapshot_report_bytes(run)
+        workbook = load_workbook(io.BytesIO(content), data_only=False)
+        formula_cells = [
+            f"{sheet.title}!{cell.coordinate}"
+            for sheet in workbook.worksheets
+            for row in sheet.iter_rows()
+            for cell in row
+            if cell.data_type == "f"
+        ]
+        self.assertEqual(formula_cells, [])
 
 
 if __name__ == "__main__":
