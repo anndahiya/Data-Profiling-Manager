@@ -83,15 +83,52 @@ class StreamlitSmokeTests(unittest.TestCase):
                     app.run(timeout=30)
                     self.assertEqual(len(app.exception), 0, [exception.message for exception in app.exception])
 
-    def test_local_app_empty_dashboard_renders(self):
+    def test_every_local_page_renders_without_exception(self):
+        workspace = self.populated_workspace()
+        registry = [
+            {
+                "id": item["id"],
+                "name": item["name"],
+                "description": item.get("description", ""),
+                "tags": item.get("tags", []),
+                "owner": item.get("owner", ""),
+                "source": "https://example.com/customers.csv",
+                "schedule": item.get("schedule"),
+            }
+            for item in workspace["datasets"]
+        ]
+        pages = [
+            "Dashboard",
+            "Datasets",
+            "Run profiling",
+            "Report viewer",
+            "History",
+            "Compare",
+            "Trends",
+            "Monitor",
+            "AI explanation",
+            "Scheduling",
+            "Plugins",
+            "Settings",
+        ]
         app = AppTest.from_file("local_app.py")
+        app.session_state["page"] = "Dashboard"
+        app.session_state["nav_page"] = "Dashboard"
+        app.session_state["selected_run_id"] = workspace["runs"][-1]["run_id"]
         with (
             patch("local_common.ensure_dirs", return_value=None),
-            patch("local_common.load_registry", return_value=[]),
-            patch("local_common.load_history", return_value=[]),
+            patch("local_common.load_registry", return_value=registry),
+            patch("local_common.load_history", return_value=workspace["runs"]),
+            patch("local_common.load_failures", return_value=[]),
+            patch("local_common.backup_bytes", return_value=b"PK\x03\x04test"),
         ):
             app.run(timeout=30)
-        self.assertEqual(len(app.exception), 0, [exception.message for exception in app.exception])
+            self.assertEqual(len(app.exception), 0, [exception.message for exception in app.exception])
+            for page in pages[1:]:
+                with self.subTest(page=page):
+                    app.radio[0].set_value(page)
+                    app.run(timeout=30)
+                    self.assertEqual(len(app.exception), 0, [exception.message for exception in app.exception])
 
 
 if __name__ == "__main__":
