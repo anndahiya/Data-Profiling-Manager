@@ -4,6 +4,7 @@ import { useWorkspace } from './workspace';
 import { AssetDetailPage, AssetsPage } from './pages/AssetsPage';
 import { ComparePage, HistoryPage } from './pages/HistoryComparePages';
 import { IssuesPage, RulesPage } from './pages/IssuesRulesPages';
+import { MonitoringPage } from './pages/MonitoringPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { RunReportPage } from './pages/RunReportPage';
@@ -23,6 +24,7 @@ export default function App() {
     <Route path="/compare" element={<ComparePage workspace={workspace} />} />
     <Route path="/issues" element={<IssuesPage workspace={workspace} reload={reload} />} />
     <Route path="/rules" element={<RulesPage workspace={workspace} reload={reload} />} />
+    <Route path="/monitoring" element={<MonitoringPage workspace={workspace} reload={reload} />} />
     <Route path="/settings" element={<SettingsPage workspace={workspace} reload={reload} />} />
     <Route path="*" element={<Navigate to="/overview" replace />} />
   </Routes></AppShell>;
