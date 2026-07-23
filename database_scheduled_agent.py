@@ -3,12 +3,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import monthly_profiling_agent as scheduled
 from database_connectors import find_connection, load_connector_config, read_database_connection
 from quality_engine import load_quality_config
+
+CONNECTOR_CONFIG_FILE = Path(os.environ.get("DPM_CONNECTOR_CONFIG", "connector_config.json"))
 
 
 def select_connections(config: dict[str, Any], args: argparse.Namespace) -> list[dict[str, Any]]:
@@ -80,7 +84,7 @@ def main() -> int:
     parser.add_argument("--connection", help="Process one connection ID.")
     args = parser.parse_args()
     try:
-        connector_config = load_connector_config(scheduled.Path(scheduled.os.environ.get("DPM_CONNECTOR_CONFIG", "connector_config.json")))
+        connector_config = load_connector_config(CONNECTOR_CONFIG_FILE)
         if not connector_config:
             raise FileNotFoundError("connector_config.json is required.")
         selected = select_connections(connector_config, args)
