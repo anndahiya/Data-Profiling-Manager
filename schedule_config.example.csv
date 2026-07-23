@@ -1,2 +1,2 @@
-dataset_id,dataset,source,recipient_name,recipient_email,cadence,weekday,day_of_month,month,hour_utc,minute,ai_summary,cron
-customer-master,Customer Master,https://example.com/customer.csv,Jane Smith,jane@example.com,Monthly,Monday,1,1,7,0,true,0 7 1 * *
+dataset_id,dataset,source,recipient_name,recipient_email,cc_emails,cadence,weekday,day_of_month,month,hour_utc,minute,delivery_mode,attach_report,ai_summary,minimum_overall_quality,minimum_record_compliance,maximum_missing_percent,maximum_duplicate_rows,maximum_row_change_percent,maximum_freshness_hours,cron
+customer-master,Customer Master,https://example.com/customer.csv,Jane Smith,jane@example.com,data-office@example.com,Monthly,Monday,1,1,7,0,breach-only,true,true,95,90,5,0,20,48,0 7 1 * *

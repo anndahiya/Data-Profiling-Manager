@@ -24,11 +24,11 @@ def clean_id(value: str) -> str:
 
 
 def cadence_to_cron(config: dict[str, Any]) -> str:
-    minute = int(config.get("minute", 0))
-    hour = int(config.get("hour_utc", 7))
+    minute = min(59, max(0, int(config.get("minute", 0))))
+    hour = min(23, max(0, int(config.get("hour_utc", 7))))
     cadence = str(config.get("cadence", "Monthly"))
-    day_of_month = int(config.get("day_of_month", 1))
-    month = int(config.get("month", 1))
+    day_of_month = min(28, max(1, int(config.get("day_of_month", 1))))
+    month = min(12, max(1, int(config.get("month", 1))))
     weekday = WEEKDAYS.get(str(config.get("weekday", "Monday")), 1)
     if cadence == "Weekly":
         return f"{minute} {hour} * * {weekday}"
@@ -45,13 +45,22 @@ CONFIG_FIELDS = [
     "source",
     "recipient_name",
     "recipient_email",
+    "cc_emails",
     "cadence",
     "weekday",
     "day_of_month",
     "month",
     "hour_utc",
     "minute",
+    "delivery_mode",
+    "attach_report",
     "ai_summary",
+    "minimum_overall_quality",
+    "minimum_record_compliance",
+    "maximum_missing_percent",
+    "maximum_duplicate_rows",
+    "maximum_row_change_percent",
+    "maximum_freshness_hours",
     "cron",
 ]
 
@@ -59,6 +68,8 @@ CONFIG_FIELDS = [
 def normalize_config(config: dict[str, Any]) -> dict[str, Any]:
     row = dict(config)
     row.setdefault("dataset_id", clean_id(str(row.get("dataset", "dataset"))))
+    row.setdefault("delivery_mode", "every-run")
+    row.setdefault("attach_report", True)
     row["cron"] = cadence_to_cron(row)
     return {field: row.get(field, "") for field in CONFIG_FIELDS}
 
@@ -96,8 +107,8 @@ jobs:
   profile-and-email:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       - run: pip install -r requirements.txt
