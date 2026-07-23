@@ -59,4 +59,22 @@ describe('profiling and DQ evaluation', () => {
     expect(run.duplicateRows).toBe(1);
     expect(run.columns.find((column) => column.name === 'state')?.missingCount).toBe(1);
   });
+
+  it('only infers uniqueness rules for identifier-shaped columns', () => {
+    const run = profileRows(
+      makeRows([
+        { customer_id: 1, annual_income: 51000, updated_at: '2026-07-20' },
+        { customer_id: 2, annual_income: 62000, updated_at: '2026-07-21' },
+        { customer_id: 3, annual_income: 73000, updated_at: '2026-07-22' },
+      ]),
+      'customer',
+      'customer.csv',
+      'CSV',
+    );
+
+    expect(run.columns.find((column) => column.name === 'customer_id')?.likelyKey).toBe(true);
+    expect(run.columns.find((column) => column.name === 'annual_income')?.likelyKey).toBe(false);
+    expect(run.columns.find((column) => column.name === 'updated_at')?.likelyKey).toBe(false);
+    expect(run.quality.dimensions.find((dimension) => dimension.dimension === 'Uniqueness')?.activeRules).toBe(1);
+  });
 });
