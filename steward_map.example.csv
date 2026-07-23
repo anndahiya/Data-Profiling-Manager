@@ -1,0 +1,2 @@
+dataset,file_path,steward_name,steward_email
+customers,/path/to/customers.csv,Example Owner,owner@example.com
