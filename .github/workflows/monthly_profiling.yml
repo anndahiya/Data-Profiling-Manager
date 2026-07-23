@@ -1,10 +1,10 @@
-name: Manual Data Profiling Test
+name: Scheduled Data Profiling Example
 
 on:
   workflow_dispatch:
 
 jobs:
-  profile:
+  profile-and-email:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -12,7 +12,14 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r requirements.txt
-      - run: python monthly_profiling_agent.py --all
+      - name: Run configured profiles
+        shell: bash
+        run: |
+          if [ ! -f schedule_config.csv ]; then
+            echo "No schedule_config.csv is present. Generate and add one before enabling this workflow."
+            exit 0
+          fi
+          python monthly_profiling_agent.py --all
         env:
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
@@ -20,3 +27,14 @@ jobs:
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: gemini-2.5-flash
+      - name: Upload profiling outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: data-profiling-results-${{ github.run_id }}
+          path: |
+            scheduled_reports/
+            run_log.jsonl
+            profiling_history.jsonl
+          if-no-files-found: ignore
+          retention-days: 30
