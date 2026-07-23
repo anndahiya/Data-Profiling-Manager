@@ -1,4 +1,4 @@
-name: Scheduled Data Profiling
+name: Manual Data Profiling Test
 
 on:
   workflow_dispatch:
@@ -12,8 +12,10 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r requirements.txt
-      - run: python monthly_profiling_agent.py
+      - run: python monthly_profiling_agent.py --all
         env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
