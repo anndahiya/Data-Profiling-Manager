@@ -23,7 +23,7 @@ page = st.session_state["page"]
 render_sidebar_menu(
     PAGES,
     page,
-    caption="Local edition: dataset paths, reports, history, and settings stay on this computer.",
+    caption="Files, reports, and history stay on this computer.",
 )
 render_page(page, registry, history, failures)
 render_footer()
