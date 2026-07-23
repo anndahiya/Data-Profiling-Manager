@@ -1,0 +1,106 @@
+.global-search {
+  position: relative;
+  width: min(520px, 54vw);
+}
+
+.global-search .topbar-search {
+  width: 100%;
+}
+
+.topbar-search input {
+  min-width: 0;
+  flex: 1;
+  color: #36394d;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  font-size: 12px;
+}
+
+.topbar-search input::placeholder {
+  color: #8a90a2;
+}
+
+.topbar-search button {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: #777d90;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+}
+
+.topbar-search button:hover {
+  color: #474a61;
+  background: #e9ebf2;
+}
+
+.search-results {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  z-index: 60;
+  overflow: hidden;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid #dfe2eb;
+  border-radius: 11px;
+  box-shadow: 0 18px 45px rgba(24, 27, 48, .18);
+}
+
+.search-results a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 8px;
+}
+
+.search-results a:hover {
+  background: #f3f3ff;
+}
+
+.search-result-icon {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  display: grid;
+  place-items: center;
+  color: #5552bc;
+  background: #ededff;
+  border-radius: 8px;
+}
+
+.search-results b,
+.search-results small {
+  display: block;
+}
+
+.search-results b {
+  color: #292c43;
+  font-size: 11px;
+}
+
+.search-results small {
+  margin-top: 3px;
+  color: #868c9e;
+  font-size: 9px;
+}
+
+.search-no-results {
+  padding: 15px 12px;
+  color: #777d90;
+  font-size: 10px;
+  text-align: center;
+}
+
+@media (max-width: 760px) {
+  .global-search {
+    flex: 1;
+    width: auto;
+  }
+}
