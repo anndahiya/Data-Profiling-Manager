@@ -1,7 +1,8 @@
-import { useState, type ReactNode } from 'react';
-import { BellRing, BookOpenCheck, CircleGauge, Columns3, Database, History, Menu, Search, Settings, ShieldCheck, UploadCloud } from 'lucide-react';
+import { useMemo, useState, type ReactNode } from 'react';
+import { BellRing, BookOpenCheck, CircleGauge, Columns3, Database, FileBarChart, History, Menu, Search, Settings, ShieldCheck, TriangleAlert, UploadCloud, X } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import type { WorkspaceSnapshot } from './types';
+import { formatDate } from './utils';
 
 const navGroups = [
   { label: 'Workspace', items: [
@@ -21,7 +22,27 @@ const navGroups = [
 export function AppShell({ children, workspace }: { children: ReactNode; workspace: WorkspaceSnapshot }) {
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [query, setQuery] = useState('');
   const openIssues = workspace.issues.filter((issue) => issue.status === 'Open').length;
+  const results = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (needle.length < 2) return [];
+    const assets = workspace.datasets
+      .filter((dataset) => `${dataset.name} ${dataset.owner} ${dataset.description} ${dataset.tags.join(' ')}`.toLowerCase().includes(needle))
+      .slice(0, 4)
+      .map((dataset) => ({ id: `asset-${dataset.id}`, path: `/assets/${dataset.id}`, type: 'Data asset', title: dataset.name, detail: dataset.owner || 'No owner', icon: Database }));
+    const runs = workspace.runs
+      .filter((run) => `${run.fileName} ${workspace.datasets.find((dataset) => dataset.id === run.datasetId)?.name ?? ''}`.toLowerCase().includes(needle))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, 4)
+      .map((run) => ({ id: `run-${run.id}`, path: `/runs/${run.id}`, type: 'Profiling run', title: run.fileName, detail: formatDate(run.createdAt), icon: FileBarChart }));
+    const issues = workspace.issues
+      .filter((issue) => `${issue.title} ${issue.description} ${issue.category} ${issue.status}`.toLowerCase().includes(needle))
+      .slice(0, 4)
+      .map((issue) => ({ id: `issue-${issue.id}`, path: '/issues', type: issue.category, title: issue.title, detail: issue.status, icon: TriangleAlert }));
+    return [...assets, ...runs, ...issues].slice(0, 8);
+  }, [query, workspace]);
+
   return <div className="app-shell">
     <aside className={`sidebar ${mobileOpen ? 'open' : ''}`}>
       <div className="brand-block"><div className="brand-mark">DP</div><div><strong>Data Profiling Manager</strong><span>Profile · Monitor · Compare</span></div></div>
@@ -37,7 +58,10 @@ export function AppShell({ children, workspace }: { children: ReactNode; workspa
     {mobileOpen && <button className="mobile-scrim" aria-label="Close menu" onClick={() => setMobileOpen(false)} />}
     <main className="main-shell"><header className="topbar">
       <button className="icon-button mobile-menu" onClick={() => setMobileOpen(true)} aria-label="Open navigation"><Menu size={20} /></button>
-      <div className="topbar-search"><Search size={17} /><span>Search assets, runs, issues, and rules</span><kbd>⌘ K</kbd></div>
+      <div className="global-search">
+        <label className="topbar-search"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search assets, runs, and issues" aria-label="Search workspace" />{query && <button type="button" aria-label="Clear search" onClick={() => setQuery('')}><X size={14} /></button>}</label>
+        {query.trim().length >= 2 && <div className="search-results">{results.length ? results.map(({ id, path, type, title, detail, icon: Icon }) => <Link key={id} to={path} onClick={() => setQuery('')}><span className="search-result-icon"><Icon size={15} /></span><span><b>{title}</b><small>{type} · {detail}</small></span></Link>) : <div className="search-no-results">No assets, runs, or issues match “{query.trim()}”.</div>}</div>}
+      </div>
       <div className="topbar-status"><span className="status-dot" /> Local browser workspace</div>
     </header><div className="content-shell">{children}</div></main>
   </div>;
