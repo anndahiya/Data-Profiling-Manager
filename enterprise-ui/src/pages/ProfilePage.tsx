@@ -1,85 +1,144 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, RefreshCw, ShieldCheck, Sparkles, UploadCloud } from 'lucide-react';
+import { AlertTriangle, RefreshCw, Sparkles } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { PageHeader } from '../components';
 import { db } from '../db';
 import { compareSchema, createIssues, parseFile, profileRows } from '../profiler';
-import type { Dataset, ProfileRun, SchemaDiff, WorkspaceSnapshot } from '../types';
+import { SourcePicker } from '../SourcePicker';
+import { pickLinkedDirectory, pickLinkedFile, resolveLinkedSource, supportsPersistentFileAccess } from '../sources';
+import type { Dataset, DatasetSource, LinkedSourceHandle, ProfileRun, SchemaDiff, SourceMode, WorkspaceSnapshot } from '../types';
 import { latestRunFor } from '../utils';
+
+type PendingRun = { run: ProfileRun; diff: SchemaDiff; existing?: Dataset; source: DatasetSource; handle?: LinkedSourceHandle };
 
 export function ProfilePage({ workspace, reload }: { workspace: WorkspaceSnapshot; reload: () => Promise<void> }) {
   const navigate = useNavigate();
-  const params = new URLSearchParams(useLocation().search);
-  const presetDataset = params.get('dataset') ?? '';
+  const presetDataset = new URLSearchParams(useLocation().search).get('dataset') ?? '';
   const [datasetId, setDatasetId] = useState(presetDataset || 'new');
   const [name, setName] = useState('');
   const [owner, setOwner] = useState('');
   const [description, setDescription] = useState('');
+  const [sourceMode, setSourceMode] = useState<SourceMode>('manual-upload');
   const [file, setFile] = useState<File | null>(null);
+  const [linkedHandle, setLinkedHandle] = useState<LinkedSourceHandle | null>(null);
+  const [sourceLabel, setSourceLabel] = useState('');
+  const [filePattern, setFilePattern] = useState('*.csv');
+  const [selectionStrategy, setSelectionStrategy] = useState<NonNullable<DatasetSource['selectionStrategy']>>('latest-modified');
   const [processing, setProcessing] = useState(false);
+  const [linking, setLinking] = useState(false);
   const [error, setError] = useState('');
-  const [pending, setPending] = useState<{ run: ProfileRun; diff: SchemaDiff; existing?: Dataset } | null>(null);
+  const [pending, setPending] = useState<PendingRun | null>(null);
   const selectedDataset = workspace.datasets.find((dataset) => dataset.id === datasetId);
 
   useEffect(() => {
-    if (selectedDataset) { setName(selectedDataset.name); setOwner(selectedDataset.owner); setDescription(selectedDataset.description); }
-    else if (datasetId === 'new') { setName(''); setOwner(''); setDescription(''); }
+    let active = true;
+    const load = async () => {
+      setFile(null); setError('');
+      if (selectedDataset) {
+        setName(selectedDataset.name); setOwner(selectedDataset.owner); setDescription(selectedDataset.description);
+        const source = selectedDataset.source ?? { mode: 'manual-upload' as const };
+        setSourceMode(source.mode === 'database' ? 'manual-upload' : source.mode);
+        setSourceLabel(source.displayName ?? ''); setFilePattern(source.filePattern ?? '*.csv');
+        setSelectionStrategy(source.selectionStrategy ?? 'latest-modified');
+        const stored = await db.sourceHandles.get(selectedDataset.id);
+        if (active) setLinkedHandle(stored ?? null);
+      } else {
+        setName(''); setOwner(''); setDescription(''); setSourceMode('manual-upload'); setFile(null);
+        setLinkedHandle(null); setSourceLabel(''); setFilePattern('*.csv'); setSelectionStrategy('latest-modified');
+      }
+    };
+    void load();
+    return () => { active = false; };
   }, [datasetId, selectedDataset]);
 
-  const commitRun = async (run: ProfileRun, dataset: Dataset) => {
+  const sourceConfig = (): DatasetSource => ({
+    mode: sourceMode,
+    displayName: sourceMode === 'manual-upload' ? file?.name : sourceLabel,
+    filePattern: sourceMode === 'linked-folder' ? filePattern.trim() || '*' : undefined,
+    selectionStrategy: sourceMode === 'linked-folder' ? selectionStrategy : undefined,
+  });
+
+  const commitRun = async (run: ProfileRun, dataset: Dataset, handle?: LinkedSourceHandle) => {
     const previous = latestRunFor(dataset.id, workspace.runs);
-    const issues = createIssues(dataset, run, previous).map((issue) => issue.metric === 'Timeliness' ? {
-      ...issue,
-      category: 'Freshness' as const,
-      title: 'Freshness baseline failed',
-      description: `${issue.description} The browser baseline treats values older than 30 days as stale until a governed freshness policy is configured.`,
-    } : issue);
-    await db.transaction('rw', db.datasets, db.runs, db.issues, async () => {
+    const issues = createIssues(dataset, run, previous).map((issue) => issue.metric === 'Timeliness' ? { ...issue, category: 'Freshness' as const, title: 'Freshness baseline failed', description: `${issue.description} The browser baseline treats values older than 30 days as stale until a governed freshness policy is configured.` } : issue);
+    await db.transaction('rw', db.datasets, db.runs, db.issues, db.sourceHandles, async () => {
       await db.datasets.put({ ...dataset, latestRunId: run.id, updatedAt: run.createdAt });
       await db.runs.put(run);
       if (issues.length) await db.issues.bulkPut(issues);
+      if (handle) await db.sourceHandles.put({ ...handle, datasetId: dataset.id, updatedAt: run.createdAt });
+      else if (dataset.source?.mode === 'manual-upload') await db.sourceHandles.delete(dataset.id);
     });
-    await reload();
-    navigate(`/runs/${run.id}`);
+    await reload(); navigate(`/runs/${run.id}`);
+  };
+
+  const chooseFile = async () => {
+    setLinking(true); setError('');
+    try {
+      const handle = await pickLinkedFile();
+      setLinkedHandle({ datasetId: selectedDataset?.id ?? 'pending', kind: 'file', handle, displayName: handle.name, updatedAt: new Date().toISOString() });
+      setSourceLabel(handle.name); setSourceMode('linked-file');
+    } catch (caught) { if (!(caught instanceof DOMException && caught.name === 'AbortError')) setError(caught instanceof Error ? caught.message : 'The file could not be linked.'); }
+    finally { setLinking(false); }
+  };
+
+  const chooseFolder = async () => {
+    setLinking(true); setError('');
+    try {
+      const handle = await pickLinkedDirectory();
+      setLinkedHandle({ datasetId: selectedDataset?.id ?? 'pending', kind: 'directory', handle, displayName: handle.name, updatedAt: new Date().toISOString() });
+      setSourceLabel(handle.name); setSourceMode('linked-folder');
+    } catch (caught) { if (!(caught instanceof DOMException && caught.name === 'AbortError')) setError(caught instanceof Error ? caught.message : 'The folder could not be linked.'); }
+    finally { setLinking(false); }
   };
 
   const handleProfile = async () => {
-    if (!file || !name.trim()) return;
+    if (!name.trim()) return;
     setProcessing(true); setError('');
     try {
-      const { rows, sourceKind } = await parseFile(file);
       const targetId = selectedDataset?.id ?? crypto.randomUUID();
-      const run = profileRows(rows, targetId, file.name, sourceKind);
-      const previous = selectedDataset ? latestRunFor(selectedDataset.id, workspace.runs) : undefined;
-      const diff = compareSchema(previous, run.columns);
-      if (selectedDataset && diff.hasChanges) setPending({ run, diff, existing: selectedDataset });
+      const source = sourceConfig();
+      let selectedFile: File; let sourceKind: ProfileRun['sourceKind']; let sourceReference: string; let storedHandle: LinkedSourceHandle | undefined;
+      if (sourceMode === 'manual-upload') {
+        if (!file) throw new Error('Choose a file to profile.');
+        selectedFile = file; sourceReference = file.name; sourceKind = file.name.toLowerCase().endsWith('.xlsx') ? 'Excel' : 'CSV';
+      } else {
+        if (!linkedHandle) throw new Error('Link a file or folder before running the profile.');
+        const resolved = await resolveLinkedSource(source, linkedHandle);
+        selectedFile = resolved.file; sourceReference = resolved.sourceLabel;
+        sourceKind = sourceMode === 'linked-folder' ? 'Linked folder' : 'Linked file';
+        storedHandle = { ...linkedHandle, datasetId: targetId };
+      }
+      const parsed = await parseFile(selectedFile);
+      const run = { ...profileRows(parsed.rows, targetId, selectedFile.name, sourceKind), sourceReference };
+      const diff = compareSchema(selectedDataset ? latestRunFor(selectedDataset.id, workspace.runs) : undefined, run.columns);
+      if (selectedDataset && diff.hasChanges) setPending({ run, diff, existing: selectedDataset, source, handle: storedHandle });
       else {
         const now = new Date().toISOString();
-        await commitRun(run, selectedDataset ?? { id: targetId, name: name.trim(), owner: owner.trim(), description: description.trim(), tags: [], createdAt: now, updatedAt: now });
+        const dataset = selectedDataset ? { ...selectedDataset, source } : { id: targetId, name: name.trim(), owner: owner.trim(), description: description.trim(), tags: [], createdAt: now, updatedAt: now, source };
+        await commitRun(run, dataset, storedHandle);
       }
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Profiling failed.');
-    } finally { setProcessing(false); }
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Profiling failed.'); }
+    finally { setProcessing(false); }
   };
 
   const saveAsNew = async () => {
     if (!pending) return;
-    const now = new Date().toISOString();
-    const newId = crypto.randomUUID();
+    const now = new Date().toISOString(); const newId = crypto.randomUUID();
     const newRun = { ...pending.run, id: crypto.randomUUID(), datasetId: newId };
-    await commitRun(newRun, { id: newId, name: `${name.trim()} — ${file?.name.replace(/\.[^.]+$/, '') || 'new schema'}`, owner: owner.trim(), description: description.trim(), tags: ['Schema variant'], createdAt: now, updatedAt: now });
+    await commitRun(newRun, { id: newId, name: `${name.trim()} — ${newRun.fileName.replace(/\.[^.]+$/, '') || 'new schema'}`, owner: owner.trim(), description: description.trim(), tags: ['Schema variant'], createdAt: now, updatedAt: now, source: pending.source }, pending.handle ? { ...pending.handle, datasetId: newId } : undefined);
     setPending(null);
   };
 
+  const canRun = Boolean(name.trim() && (sourceMode === 'manual-upload' ? file : linkedHandle));
   return <>
-    <PageHeader title="Profile data" description="Upload a file, inspect the inferred schema, and save the run to a new or existing data asset." />
+    <PageHeader title="Profile data" description="Upload once, link a file, or link a versioned folder so future runs can reuse the same source." />
     {error && <div className="alert error"><AlertTriangle size={17} />{error}</div>}
     <div className="wizard-grid">
-      <section className="panel form-panel"><div className="step-label"><span>1</span> Select destination</div><label className="field"><span>Data asset</span><select value={datasetId} onChange={(event) => setDatasetId(event.target.value)}><option value="new">Create a new asset</option>{workspace.datasets.map((dataset) => <option value={dataset.id} key={dataset.id}>{dataset.name}</option>)}</select></label><div className="field-grid"><label className="field"><span>Asset name</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Customer master" /></label><label className="field"><span>Owner</span><input value={owner} onChange={(event) => setOwner(event.target.value)} placeholder="Customer Data Office" /></label></div><label className="field"><span>Description</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What this dataset contains and where it is used" /></label></section>
-      <section className="panel form-panel"><div className="step-label"><span>2</span> Choose file</div><label className={`dropzone ${file ? 'has-file' : ''}`}><input type="file" accept=".csv,.txt,.xlsx" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /><UploadCloud size={28} /><strong>{file ? file.name : 'Drop a CSV or .xlsx file here'}</strong><span>{file ? `${(file.size / 1024 / 1024).toFixed(2)} MB · ready to profile` : 'Your file is processed in this browser. It is not uploaded to our server.'}</span></label><div className="privacy-note"><ShieldCheck size={17} /><div><strong>Private by default</strong><span>Only aggregate profiles, DQ results, and issues are stored in IndexedDB.</span></div></div></section>
+      <section className="panel form-panel"><div className="step-label"><span>1</span> Select destination</div><label className="field"><span>Data asset</span><select value={datasetId} onChange={(event) => setDatasetId(event.target.value)}><option value="new">Create a new asset</option>{workspace.datasets.map((dataset) => <option value={dataset.id} key={dataset.id}>{dataset.name}</option>)}</select></label><div className="field-grid"><label className="field"><span>Asset name</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Customer master" /></label><label className="field"><span>Owner / steward</span><input value={owner} onChange={(event) => setOwner(event.target.value)} placeholder="Customer Data Office" /></label></div><label className="field"><span>Description</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What this dataset contains and where it is used" /></label></section>
+      <SourcePicker sourceMode={sourceMode} setSourceMode={(value) => { setSourceMode(value); setError(''); }} file={file} setFile={setFile} sourceLabel={sourceLabel} filePattern={filePattern} setFilePattern={setFilePattern} selectionStrategy={selectionStrategy} setSelectionStrategy={setSelectionStrategy} persistentAccessSupported={supportsPersistentFileAccess()} linking={linking} chooseLinkedFile={() => void chooseFile()} chooseLinkedFolder={() => void chooseFolder()} />
     </div>
-    <div className="sticky-action"><div><strong>Ready to profile?</strong><span>The system will infer datatypes, profile columns, evaluate starter rules, and check for schema changes.</span></div><button className="primary-button" disabled={!file || !name.trim() || processing} onClick={() => void handleProfile()}>{processing ? <RefreshCw className="spin" size={17} /> : <Sparkles size={17} />} {processing ? 'Profiling…' : 'Run profile & DQ evaluation'}</button></div>
-    {pending && <SchemaDialog diff={pending.diff} onCancel={() => setPending(null)} onContinue={() => void commitRun(pending.run, pending.existing!)} onSaveNew={() => void saveAsNew()} />}
+    <div className="sticky-action"><div><strong>{sourceMode === 'manual-upload' ? 'Ready to profile?' : 'Ready to refresh this asset?'}</strong><span>{sourceMode === 'linked-folder' ? `The app will select the ${selectionStrategy === 'latest-modified' ? 'most recently modified' : 'highest-version'} file matching ${filePattern || '*'}.` : sourceMode === 'linked-file' ? 'The app will read the latest saved contents of the linked file.' : 'The system will infer datatypes, profile columns, evaluate starter rules, and check for schema changes.'}</span></div><button className="primary-button" disabled={!canRun || processing} onClick={() => void handleProfile()}>{processing ? <RefreshCw className="spin" size={17} /> : <Sparkles size={17} />} {processing ? 'Profiling…' : sourceMode === 'manual-upload' ? 'Run profile & DQ evaluation' : 'Run latest from linked source'}</button></div>
+    {pending && <SchemaDialog diff={pending.diff} onCancel={() => setPending(null)} onContinue={() => void commitRun(pending.run, { ...pending.existing!, source: pending.source }, pending.handle)} onSaveNew={() => void saveAsNew()} />}
   </>;
 }
 
