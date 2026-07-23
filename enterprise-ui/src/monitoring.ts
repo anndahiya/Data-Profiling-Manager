@@ -1,5 +1,5 @@
 import { recordComplianceScore } from './scoring';
-import type { Dataset, MonitorPolicy, ProfileRun } from './types';
+import type { Dataset, MonitorPolicy, ProfileRun, WorkspaceSnapshot } from './types';
 
 const WEEKDAYS: Record<string, number> = { Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6 };
 
@@ -37,6 +37,15 @@ export function policiesToCsv(policies: MonitorPolicy[], datasets: Dataset[]): s
     ];
   });
   return [fields, ...rows].map((row) => row.map(csvValue).join(',')).join('\n');
+}
+
+export function qualityConfigJson(workspace: WorkspaceSnapshot): string {
+  return JSON.stringify({
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    dimensions: (workspace.dimensions ?? []).map(({ id, name, description, weight, enabled, source }) => ({ id, name, description, weight, enabled, source })),
+    rules: workspace.rules.map(({ id, datasetId, name, dimension, columnName, ruleType, expectedValue, secondaryValue, enabled, weight, threshold, severity }) => ({ id, datasetId, name, dimension, columnName, ruleType, expectedValue, secondaryValue, enabled, weight, threshold, severity })),
+  }, null, 2);
 }
 
 export function buildScheduledWorkflow(policies: MonitorPolicy[]): string {
