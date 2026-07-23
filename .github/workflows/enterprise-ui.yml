@@ -1,0 +1,32 @@
+name: Test Enterprise Web Rebuild
+
+on:
+  pull_request:
+    paths:
+      - "enterprise-ui/**"
+      - ".github/workflows/enterprise-ui.yml"
+  workflow_dispatch:
+
+jobs:
+  test-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: enterprise-ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: enterprise-ui/package-lock.json
+      - run: npm install --no-audit --no-fund
+      - run: npm test
+      - run: npm run build
+      - name: Upload production build
+        uses: actions/upload-artifact@v4
+        with:
+          name: enterprise-ui-dist
+          path: enterprise-ui/dist
+          if-no-files-found: error
+          retention-days: 14
