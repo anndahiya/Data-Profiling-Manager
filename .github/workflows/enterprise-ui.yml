@@ -1,0 +1,54 @@
+name: Test Enterprise Web Rebuild
+
+on:
+  pull_request:
+    paths:
+      - "enterprise-ui/**"
+      - ".github/workflows/enterprise-ui.yml"
+  workflow_dispatch:
+
+jobs:
+  test-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: enterprise-ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --no-audit --no-fund
+      - name: Run profiling and DQ tests
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee test-output.txt
+      - name: Upload complete test transcript
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: enterprise-ui-test-output
+          path: enterprise-ui/test-output.txt
+          if-no-files-found: error
+          retention-days: 14
+      - name: Compile production application
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee build-output.txt
+      - name: Upload complete build transcript
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: enterprise-ui-build-output
+          path: enterprise-ui/build-output.txt
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload production build
+        uses: actions/upload-artifact@v4
+        with:
+          name: enterprise-ui-dist
+          path: enterprise-ui/dist
+          if-no-files-found: error
+          retention-days: 14
