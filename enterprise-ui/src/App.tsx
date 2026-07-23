@@ -3,7 +3,7 @@ import { AppShell, LoadingScreen } from './layout';
 import { useWorkspace } from './workspace';
 import { AssetDetailPage, AssetsPage } from './pages/AssetsPage';
 import { ComparePage, HistoryPage } from './pages/HistoryComparePages';
-import { ConnectionsPage } from './pages/ConnectionsPage';
+import { ConnectionsWorkspacePage } from './pages/ConnectionsWorkspacePage';
 import { IssuesPage, RulesPage } from './pages/IssuesRulesPages';
 import { MonitoringWorkspacePage } from './pages/MonitoringWorkspacePage';
 import { OverviewPage } from './pages/OverviewPage';
@@ -20,7 +20,7 @@ export default function App() {
     <Route path="/assets" element={<AssetsPage workspace={workspace} />} />
     <Route path="/assets/:datasetId" element={<AssetDetailPage workspace={workspace} />} />
     <Route path="/profile" element={<ProfilePage workspace={workspace} reload={reload} />} />
-    <Route path="/connections" element={<ConnectionsPage workspace={workspace} reload={reload} />} />
+    <Route path="/connections" element={<ConnectionsWorkspacePage workspace={workspace} reload={reload} />} />
     <Route path="/runs/:runId" element={<RunReportPage workspace={workspace} />} />
     <Route path="/history" element={<HistoryPage workspace={workspace} reload={reload} />} />
     <Route path="/compare" element={<ComparePage workspace={workspace} />} />
