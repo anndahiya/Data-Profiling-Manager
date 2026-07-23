@@ -5,10 +5,19 @@ venv/
 .env
 .DS_Store
 .streamlit/secrets.toml
+
+# Local application state and scheduled outputs
 .profiling_manager/
 scheduled_reports/
 run_log.jsonl
 profiling_history.jsonl
 schedule_config.csv
+
+# Protect user datasets and generated reports from accidental commits
+*.csv
+!schedule_config.example.csv
+!examples/*.csv
 *.xlsx
 !sample_profiling_report.xlsx
+*.xls
+*.parquet
