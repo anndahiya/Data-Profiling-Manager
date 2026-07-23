@@ -20,9 +20,8 @@ def safe_json_value(value):
 
 def build_ai_payload(df: pd.DataFrame, source_name: str) -> dict:
     """Build an aggregate-only payload. No raw records or sample values."""
-    bp = basic_profile(df)
-    ap = advanced_profile(df)
-
+    basic = basic_profile(df)
+    advanced = advanced_profile(df)
     missing = [
         {
             "column": row["Column"],
@@ -31,20 +30,18 @@ def build_ai_payload(df: pd.DataFrame, source_name: str) -> dict:
             "missing_percent": float(row["Missing %"]),
             "unique_count": int(row["Unique"]),
         }
-        for _, row in bp.sort_values("Missing %", ascending=False).head(15).iterrows()
+        for _, row in basic.sort_values("Missing %", ascending=False).head(15).iterrows()
         if float(row["Missing %"]) > 0
     ]
-
     outliers = [
         {
             "column": row["Column"],
             "outlier_count_iqr": int(row["Outlier Count (IQR)"]),
             "skewness": safe_json_value(row["Skewness"]),
         }
-        for _, row in ap.sort_values("Outlier Count (IQR)", ascending=False).head(10).iterrows()
+        for _, row in advanced.sort_values("Outlier Count (IQR)", ascending=False).head(10).iterrows()
         if pd.notna(row["Outlier Count (IQR)"]) and int(row["Outlier Count (IQR)"]) > 0
     ]
-
     return {
         "dataset_name": source_name,
         "rows": int(len(df)),
@@ -53,14 +50,11 @@ def build_ai_payload(df: pd.DataFrame, source_name: str) -> dict:
         "duplicate_rows": int(df.duplicated().sum()),
         "total_missing_cells": int(df.isna().sum().sum()),
         "overall_missing_percent": round(float(df.isna().sum().sum() / df.size * 100), 2) if df.size else 0,
-        "column_type_counts": {
-            str(dtype): int(count)
-            for dtype, count in df.dtypes.astype(str).value_counts().items()
-        },
+        "column_type_counts": {str(dtype): int(count) for dtype, count in df.dtypes.astype(str).value_counts().items()},
         "columns_with_most_missing_values": missing,
         "numeric_columns_with_outliers": outliers,
-        "constant_columns": ap.loc[ap["Key Candidate Flag"] == "Constant", "Column"].astype(str).tolist(),
-        "likely_key_columns": ap.loc[ap["Key Candidate Flag"] == "Likely Key", "Column"].astype(str).tolist(),
+        "constant_columns": advanced.loc[advanced["Key Candidate Flag"] == "Constant", "Column"].astype(str).tolist(),
+        "likely_key_columns": advanced.loc[advanced["Key Candidate Flag"] == "Likely Key", "Column"].astype(str).tolist(),
     }
 
 
@@ -69,7 +63,7 @@ def generate_gemini_summary(api_key: str, payload: dict, model: str) -> str:
 
     client = genai.Client(api_key=api_key)
     prompt = f"""
-You are explaining deterministic data-profiling results to a data analyst or data steward.
+You are explaining deterministic data-profiling results to a data analyst or dataset owner.
 Use only the supplied aggregate metrics. Do not claim that the dataset is good, bad, compliant,
 or fit for purpose. Do not invent causes. Clearly distinguish facts from questions worth investigating.
 
