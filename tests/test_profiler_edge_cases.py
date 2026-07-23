@@ -7,7 +7,7 @@ import pandas as pd
 from openpyxl import load_workbook
 
 from data_profiler import advanced_profile, basic_profile, build_report, duplicate_row_count, normalize_dataframe
-from snapshot_manager import create_snapshot, monitor_alerts, empty_workspace, add_snapshot, upsert_dataset
+from snapshot_manager import add_snapshot, create_snapshot, empty_workspace, monitor_alerts, upsert_dataset
 
 
 class ProfilerEdgeCaseTests(unittest.TestCase):
@@ -41,7 +41,13 @@ class ProfilerEdgeCaseTests(unittest.TestCase):
         self.assertEqual(duplicate_row_count(frame), 0)
 
     def test_report_is_valid_and_strings_are_not_formulas(self):
-        frame = pd.DataFrame({"text": ["=2+2", "+SUM(A1:A2)", "normal"], "number": [1, 2, 3]})
+        frame = pd.DataFrame(
+            {
+                "text": ["=2+2", "+SUM(A1:A2)", "normal"],
+                "number_one": [1, 2, 3],
+                "number_two": [3, 2, 1],
+            }
+        )
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "report.xlsx"
             build_report(frame, "=untrusted-source.csv", str(path))
@@ -50,6 +56,14 @@ class ProfilerEdgeCaseTests(unittest.TestCase):
             self.assertIn("Basic Profile", workbook.sheetnames)
             self.assertIn("Advanced Profile", workbook.sheetnames)
             self.assertIn("Correlation Matrix", workbook.sheetnames)
+            formula_cells = [
+                f"{sheet.title}!{cell.coordinate}"
+                for sheet in workbook.worksheets
+                for row in sheet.iter_rows()
+                for cell in row
+                if cell.data_type == "f"
+            ]
+            self.assertEqual(formula_cells, [], f"Unexpected formulas found: {formula_cells}")
             self.assertTrue(path.stat().st_size > 1000)
 
     def test_monitor_alerts_are_factual(self):
