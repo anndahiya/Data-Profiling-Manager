@@ -28,7 +28,12 @@ export function ProfilePage({ workspace, reload }: { workspace: WorkspaceSnapsho
 
   const commitRun = async (run: ProfileRun, dataset: Dataset) => {
     const previous = latestRunFor(dataset.id, workspace.runs);
-    const issues = createIssues(dataset, run, previous);
+    const issues = createIssues(dataset, run, previous).map((issue) => issue.metric === 'Timeliness' ? {
+      ...issue,
+      category: 'Freshness' as const,
+      title: 'Freshness baseline failed',
+      description: `${issue.description} The browser baseline treats values older than 30 days as stale until a governed freshness policy is configured.`,
+    } : issue);
     await db.transaction('rw', db.datasets, db.runs, db.issues, async () => {
       await db.datasets.put({ ...dataset, latestRunId: run.id, updatedAt: run.createdAt });
       await db.runs.put(run);
