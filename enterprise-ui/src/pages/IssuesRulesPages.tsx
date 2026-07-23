@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, ShieldCheck } from 'lucide-react';
+import { ShieldCheck } from 'lucide-react';
 import { IssueTable, PageHeader } from '../components';
 import { db } from '../db';
 import type { Issue, IssueStatus, ProfileRun, WorkspaceSnapshot } from '../types';
@@ -31,7 +31,7 @@ export function RulesPage({ workspace }: { workspace: WorkspaceSnapshot }) {
     return items;
   })).slice(0, 20);
   return <>
-    <PageHeader title="Rules & dimensions" description="Define what quality means for your data. Profiling suggests rules; you decide what should be promoted into a governed rule." actions={<button className="primary-button" disabled title="Custom rule builder is planned for the next backend phase"><Plus size={16} /> Create rule</button>} />
+    <PageHeader title="Rules & dimensions" description="Define what quality means for your data. Profiling suggests rules; you decide what should be promoted into a governed rule." actions={<span className="category-chip">Custom rule builder · Phase 2</span>} />
     <div className="dimension-card-grid">{dimensions.map((dimension, index) => <div className="dimension-card" key={dimension}><div className="dimension-icon" style={{ background: `${CHART_COLORS[index]}18`, color: CHART_COLORS[index] }}><ShieldCheck size={19} /></div><div><h3>{dimension}</h3><p>{dimension === 'Completeness' ? 'Required values are present.' : dimension === 'Validity' ? 'Values conform to expected types and formats.' : dimension === 'Uniqueness' ? 'Keys and identifiers are not duplicated.' : dimension === 'Consistency' ? 'Patterns and representations remain coherent.' : 'Data arrives within the expected timeframe.'}</p></div><span className="contribution-chip">Contributes to overall</span></div>)}</div>
     <section className="panel"><div className="panel-heading"><div><h2>Profiling-based rule suggestions</h2><p>Suggestions use observed null rates, likely keys, and dominant patterns. They are not silently activated as governed business rules.</p></div></div>{suggestions.length ? <div className="table-wrap"><table><thead><tr><th>Asset</th><th>Column</th><th>Suggested rule</th><th>Dimension</th><th>Why suggested</th></tr></thead><tbody>{suggestions.map((suggestion, index) => <tr key={`${suggestion.datasetId}-${suggestion.column}-${index}`}><td>{workspace.datasets.find((dataset) => dataset.id === suggestion.datasetId)?.name}</td><td><strong>{suggestion.column}</strong></td><td>{suggestion.rule}</td><td><span className="category-chip">{suggestion.dimension}</span></td><td>{suggestion.reason}</td></tr>)}</tbody></table></div> : <div className="mini-empty large">Profile a dataset to generate rule suggestions.</div>}</section>
   </>;
