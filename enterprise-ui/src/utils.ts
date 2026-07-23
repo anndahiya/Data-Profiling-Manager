@@ -19,11 +19,29 @@ export function latestRunFor(datasetId: string, runs: ProfileRun[]): ProfileRun 
   return runs.filter((run) => run.datasetId === datasetId).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
 }
 
+function weightedQuality(runs: ProfileRun[]): number {
+  const evaluated = runs.reduce((sum, run) => sum + run.quality.evaluatedRecords, 0);
+  const passing = runs.reduce((sum, run) => sum + run.quality.passingRecords, 0);
+  return evaluated ? (passing / evaluated) * 100 : 0;
+}
+
 export function weightedOverallQuality(workspace: WorkspaceSnapshot): number {
   const latest = workspace.datasets.map((dataset) => latestRunFor(dataset.id, workspace.runs)).filter(Boolean) as ProfileRun[];
-  const evaluated = latest.reduce((sum, run) => sum + run.quality.evaluatedRecords, 0);
-  const passing = latest.reduce((sum, run) => sum + run.quality.passingRecords, 0);
-  return evaluated ? (passing / evaluated) * 100 : 0;
+  return weightedQuality(latest);
+}
+
+export function workspaceQualityTrend(workspace: WorkspaceSnapshot): Array<{ date: string; quality: number; evaluatedRecords: number }> {
+  const chronological = [...workspace.runs].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const latestByDataset = new Map<string, ProfileRun>();
+  return chronological.map((run) => {
+    latestByDataset.set(run.datasetId, run);
+    const active = [...latestByDataset.values()];
+    return {
+      date: new Date(run.createdAt).toLocaleDateString('en', { month: 'short', day: 'numeric' }),
+      quality: Number(weightedQuality(active).toFixed(1)),
+      evaluatedRecords: active.reduce((sum, item) => sum + item.quality.evaluatedRecords, 0),
+    };
+  });
 }
 
 export function weightedDimensions(workspace: WorkspaceSnapshot): Array<{ dimension: string; score: number }> {
