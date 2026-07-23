@@ -78,6 +78,11 @@ def _optional_float(value: Any) -> float | None:
         return None
 
 
+def _number_or_default(value: Any, default: float) -> float:
+    parsed = _optional_float(value)
+    return default if parsed is None else parsed
+
+
 def _evaluate_rule(frame: pd.DataFrame, rule: dict[str, Any]) -> pd.Series:
     column = str(rule.get("columnName") or "")
     if column not in frame.columns:
@@ -107,7 +112,7 @@ def _evaluate_rule(frame: pd.DataFrame, rule: dict[str, Any]) -> pd.Series:
             except re.error:
                 return _pattern_for(value) == expected
         if rule_type == "freshness":
-            days = max(0.0, _optional_float(expected) or 30.0)
+            days = max(0.0, _number_or_default(expected, 30.0))
             timestamp = pd.to_datetime(value, errors="coerce", utc=True)
             if pd.isna(timestamp):
                 return False
@@ -125,7 +130,7 @@ def _evaluate_rule(frame: pd.DataFrame, rule: dict[str, Any]) -> pd.Series:
             allowed = {item.strip().lower() for item in expected.split(",") if item.strip()}
             return text.lower() in allowed
         if rule_type == "min-length":
-            return len(text) >= int(_optional_float(expected) or 0)
+            return len(text) >= int(_number_or_default(expected, 0.0))
         if rule_type == "max-length":
             maximum = _optional_float(expected)
             return len(text) <= int(maximum if maximum is not None else 2**31 - 1)
@@ -174,8 +179,8 @@ def evaluate_quality(frame: pd.DataFrame, dataset_id: str, config: dict[str, Any
             "score": (passing / total * 100.0) if total else 100.0,
             "passing_records": passing,
             "failing_records": total - passing,
-            "weight": max(0.0, _optional_float(rule.get("weight")) or 1.0),
-            "threshold": min(100.0, max(0.0, _optional_float(rule.get("threshold")) or 95.0)),
+            "weight": max(0.0, _number_or_default(rule.get("weight"), 1.0)),
+            "threshold": min(100.0, max(0.0, _number_or_default(rule.get("threshold"), 95.0))),
             "severity": str(rule.get("severity") or "Medium"),
         })
 
@@ -194,7 +199,7 @@ def evaluate_quality(frame: pd.DataFrame, dataset_id: str, config: dict[str, Any
         dimensions.append({
             "dimension": name,
             "score": score,
-            "weight": max(0.0, _optional_float(definition.get("weight")) or 1.0),
+            "weight": max(0.0, _number_or_default(definition.get("weight"), 1.0)),
             "active_rules": len(items),
             "passing_records": int(strict_passes.sum()),
             "failing_records": int(len(frame) - strict_passes.sum()),
