@@ -1,0 +1,51 @@
+name: Migrate Enterprise UI to React Router 8
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/migrate-react-router-8.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: release-hardening-p1
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Replace compatibility package and imports
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+
+          package_path = Path("enterprise-ui/package.json")
+          package = json.loads(package_path.read_text())
+          package["dependencies"].pop("react-router-dom", None)
+          package["dependencies"]["react-router"] = "8.3.0"
+          package["dependencies"] = dict(sorted(package["dependencies"].items()))
+          package_path.write_text(json.dumps(package, indent=2) + "\n")
+
+          for path in Path("enterprise-ui/src").rglob("*.ts*"):
+              text = path.read_text()
+              updated = text.replace("from 'react-router-dom'", "from 'react-router'").replace('from "react-router-dom"', 'from "react-router"')
+              if updated != text:
+                  path.write_text(updated)
+      - name: Refresh lockfile
+        working-directory: enterprise-ui
+        run: npm install --package-lock-only --ignore-scripts --no-fund
+      - name: Commit migration
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add enterprise-ui/package.json enterprise-ui/package-lock.json enterprise-ui/src
+          git commit -m "Migrate enterprise UI to React Router 8.3.0"
+          git push origin HEAD:release-hardening-p1
