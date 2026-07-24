@@ -21,6 +21,17 @@ export interface IssueReconciliationPlan {
   resolutions: Issue[];
 }
 
+function resolvedIssue(issue: Issue, detectedAt: string): Issue {
+  return {
+    ...issue,
+    issueKey: issueIdentity(issue),
+    status: 'Resolved',
+    resolvedAt: detectedAt,
+    lastDetectedAt: issue.lastDetectedAt ?? issue.createdAt,
+    occurrenceCount: Math.max(1, issue.occurrenceCount ?? 1),
+  };
+}
+
 export function reconcileIssueSet(
   existing: Issue[],
   generated: Issue[],
@@ -33,9 +44,11 @@ export function reconcileIssueSet(
     .filter((issue) => managed.has(issue.category) && ACTIVE_STATUSES.has(issue.status))
     .sort((left, right) => (right.lastDetectedAt ?? right.createdAt).localeCompare(left.lastDetectedAt ?? left.createdAt));
   const existingByKey = new Map<string, Issue>();
+  const duplicateExisting: Issue[] = [];
   activeExisting.forEach((issue) => {
     const key = issueIdentity(issue);
-    if (!existingByKey.has(key)) existingByKey.set(key, issue);
+    if (existingByKey.has(key)) duplicateExisting.push(issue);
+    else existingByKey.set(key, issue);
   });
 
   const activeKeys = new Set<string>();
@@ -71,16 +84,10 @@ export function reconcileIssueSet(
     };
   });
 
-  const resolutions = activeExisting
-    .filter((issue) => !activeKeys.has(issueIdentity(issue)))
-    .map((issue) => ({
-      ...issue,
-      issueKey: issueIdentity(issue),
-      status: 'Resolved' as const,
-      resolvedAt: detectedAt,
-      lastDetectedAt: issue.lastDetectedAt ?? issue.createdAt,
-      occurrenceCount: Math.max(1, issue.occurrenceCount ?? 1),
-    }));
+  const resolutions = [
+    ...duplicateExisting.map((issue) => resolvedIssue(issue, detectedAt)),
+    ...[...existingByKey.values()].filter((issue) => !activeKeys.has(issueIdentity(issue))).map((issue) => resolvedIssue(issue, detectedAt)),
+  ];
 
   return { upserts, resolutions };
 }
