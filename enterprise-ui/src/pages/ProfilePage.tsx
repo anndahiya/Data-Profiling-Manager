@@ -4,7 +4,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { enhanceProfileRun } from '../advancedProfiler';
 import { PageHeader } from '../components';
 import { db } from '../db';
-import { compareSchema, createIssues, parseFile, profileRows } from '../profiler';
+import { parseBrowserFile } from '../fileParser';
+import { compareSchema, createIssues, profileRows } from '../profiler';
 import { createQualityIssues, evaluateConfiguredQuality } from '../quality';
 import { SourcePicker } from '../SourcePicker';
 import { pickLinkedDirectory, pickLinkedFile, resolveLinkedSource, supportsPersistentFileAccess } from '../sources';
@@ -111,7 +112,7 @@ export function ProfilePage({ workspace, reload }: { workspace: WorkspaceSnapsho
         sourceKind = sourceMode === 'linked-folder' ? 'Linked folder' : 'Linked file';
         storedHandle = { ...linkedHandle, datasetId: targetId };
       }
-      const parsed = await parseFile(selectedFile);
+      const parsed = await parseBrowserFile(selectedFile);
       const baseRun = enhanceProfileRun(parsed.rows, profileRows(parsed.rows, targetId, selectedFile.name, sourceKind));
       const configuredRules = workspace.rules.filter((rule) => rule.datasetId === targetId);
       const run: ProfileRun = {
