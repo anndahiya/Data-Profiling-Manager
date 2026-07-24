@@ -65,9 +65,12 @@ export function ProfilePage({ workspace, reload }: { workspace: WorkspaceSnapsho
     const previous = latestRunFor(dataset.id, workspace.runs);
     const observabilityIssues = createIssues(dataset, run, previous).filter((issue) => issue.category !== 'Data quality');
     const qualityIssues = createQualityIssues(dataset.id, run.id, run.createdAt, run.quality);
+    const activeBreachMetrics = new Set(qualityIssues.map((issue) => issue.metric).filter(Boolean));
     await db.transaction('rw', db.datasets, db.runs, db.issues, db.sourceHandles, async () => {
       await db.datasets.put({ ...dataset, latestRunId: run.id, updatedAt: run.createdAt });
       await db.runs.put(run);
+      const priorQualityIssues = await db.issues.where('datasetId').equals(dataset.id).filter((issue) => issue.category === 'Data quality' && (issue.status === 'Open' || issue.status === 'Acknowledged')).toArray();
+      await Promise.all(priorQualityIssues.filter((issue) => issue.metric && !activeBreachMetrics.has(issue.metric)).map((issue) => db.issues.update(issue.id, { status: 'Resolved' })));
       if (observabilityIssues.length || qualityIssues.length) await db.issues.bulkPut([...observabilityIssues, ...qualityIssues]);
       if (handle) await db.sourceHandles.put({ ...handle, datasetId: dataset.id, updatedAt: run.createdAt });
       else if (dataset.source?.mode === 'manual-upload') await db.sourceHandles.delete(dataset.id);
@@ -104,7 +107,7 @@ export function ProfilePage({ workspace, reload }: { workspace: WorkspaceSnapsho
       let selectedFile: File; let sourceKind: ProfileRun['sourceKind']; let sourceReference: string; let storedHandle: LinkedSourceHandle | undefined;
       if (sourceMode === 'manual-upload') {
         if (!file) throw new Error('Choose a file to profile.');
-        selectedFile = file; sourceReference = file.name; sourceKind = /\.xlsx?$/i.test(file.name) ? 'Excel' : 'CSV';
+        selectedFile = file; sourceReference = file.name; sourceKind = /\.xlsx$/i.test(file.name) ? 'Excel' : 'CSV';
       } else {
         if (!linkedHandle) throw new Error('Link a file or folder before running the profile.');
         const resolved = await resolveLinkedSource(source, linkedHandle);
@@ -141,14 +144,16 @@ export function ProfilePage({ workspace, reload }: { workspace: WorkspaceSnapsho
 
   const canRun = Boolean(name.trim() && (sourceMode === 'manual-upload' ? file : linkedHandle));
   const configuredRuleCount = selectedDataset ? workspace.rules.filter((rule) => rule.datasetId === selectedDataset.id && rule.enabled).length : 0;
+  const governedEvaluation = configuredRuleCount > 0;
   return <>
     <PageHeader title="Profile data" description="Upload once, link a file, or link a versioned folder so future runs can reuse the same source." />
     {error && <div className="alert error"><AlertTriangle size={17} />{error}</div>}
+    {!governedEvaluation && <div className="alert warning"><AlertTriangle size={17} /><span>The data profile will run, but the official DQ score will show N/A until you add and enable governed rules for this asset. Profiling-based suggestions remain recommendations only.</span></div>}
     <div className="wizard-grid">
       <section className="panel form-panel"><div className="step-label"><span>1</span> Select destination</div><label className="field"><span>Data asset</span><select value={datasetId} onChange={(event) => setDatasetId(event.target.value)}><option value="new">Create a new asset</option>{workspace.datasets.map((dataset) => <option value={dataset.id} key={dataset.id}>{dataset.name}</option>)}</select></label><div className="field-grid"><label className="field"><span>Asset name</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Customer master" /></label><label className="field"><span>Owner / steward</span><input value={owner} onChange={(event) => setOwner(event.target.value)} placeholder="Customer Data Office" /></label></div><label className="field"><span>Description</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What this dataset contains and where it is used" /></label></section>
       <SourcePicker sourceMode={sourceMode} setSourceMode={(value) => { setSourceMode(value); setError(''); }} file={file} setFile={setFile} sourceLabel={sourceLabel} filePattern={filePattern} setFilePattern={setFilePattern} selectionStrategy={selectionStrategy} setSelectionStrategy={setSelectionStrategy} persistentAccessSupported={supportsPersistentFileAccess()} linking={linking} chooseLinkedFile={() => void chooseFile()} chooseLinkedFolder={() => void chooseFolder()} />
     </div>
-    <div className="sticky-action"><div><strong>{sourceMode === 'manual-upload' ? 'Ready to profile?' : 'Ready to refresh this asset?'}</strong><span>{sourceMode === 'linked-folder' ? `The app will select the ${selectionStrategy === 'latest-modified' ? 'most recently modified' : 'highest-version'} file matching ${filePattern || '*'}.` : sourceMode === 'linked-file' ? 'The app will read the latest saved contents of the linked file.' : configuredRuleCount ? `${configuredRuleCount} governed rules will be evaluated.` : 'Profiling-based baseline rules will be used until you create governed rules for this asset.'}</span></div><button className="primary-button" disabled={!canRun || processing} onClick={() => void handleProfile()}>{processing ? <RefreshCw className="spin" size={17} /> : <Sparkles size={17} />} {processing ? 'Profiling…' : sourceMode === 'manual-upload' ? 'Run profile & DQ evaluation' : 'Run latest from linked source'}</button></div>
+    <div className="sticky-action"><div><strong>{sourceMode === 'manual-upload' ? 'Ready to profile?' : 'Ready to refresh this asset?'}</strong><span>{sourceMode === 'linked-folder' ? `The app will select the ${selectionStrategy === 'latest-modified' ? 'most recently modified' : 'highest-version'} file matching ${filePattern || '*'}.` : sourceMode === 'linked-file' ? 'The app will read the latest saved contents of the linked file.' : governedEvaluation ? `${configuredRuleCount} governed rules will be evaluated.` : 'The profile will be saved without an official DQ score.'}</span></div><button className="primary-button" disabled={!canRun || processing} onClick={() => void handleProfile()}>{processing ? <RefreshCw className="spin" size={17} /> : <Sparkles size={17} />} {processing ? 'Profiling…' : governedEvaluation ? 'Run profile & DQ evaluation' : 'Run profile'}</button></div>
     {pending && <SchemaDialog diff={pending.diff} onCancel={() => setPending(null)} onContinue={() => void commitRun(pending.run, { ...pending.existing!, source: pending.source }, pending.handle)} onSaveNew={() => void saveAsNew()} />}
   </>;
 }
