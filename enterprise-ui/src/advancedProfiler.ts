@@ -1,18 +1,11 @@
+import { isNullLike, normalizeNullTokens } from './nullPolicy';
 import type { ColumnClassification, ColumnProfile, CorrelationValue, DataType, ProfileRun } from './types';
 import type { DataRow } from './profiler';
 
 export const MAX_CORRELATION_COLUMNS = 40;
-const NULL_TOKENS = ['', 'null', 'n/a', 'nan', '(blank)'];
 
-function isMissing(value: unknown): boolean {
-  if (value === null || value === undefined) return true;
-  if (typeof value === 'number' && Number.isNaN(value)) return true;
-  if (typeof value === 'string') return NULL_TOKENS.includes(value.trim().toLowerCase());
-  return false;
-}
-
-function finiteNumbers(rows: DataRow[], column: string): number[] {
-  return rows.map((row) => row[column]).filter((value) => !isMissing(value)).map(Number).filter(Number.isFinite);
+function finiteNumbers(rows: DataRow[], column: string, nullTokens: readonly string[]): number[] {
+  return rows.map((row) => row[column]).filter((value) => !isNullLike(value, nullTokens)).map(Number).filter(Number.isFinite);
 }
 
 function distributionShape(values: number[]): { skewness?: number; kurtosis?: number } {
@@ -37,23 +30,24 @@ function classification(column: ColumnProfile): ColumnClassification {
   return 'Categorical/other';
 }
 
-function textStatistics(rows: DataRow[], column: string) {
-  const lengths = rows.map((row) => row[column]).filter((value) => !isMissing(value)).map((value) => String(value).length);
+function textStatistics(rows: DataRow[], column: string, nullTokens: readonly string[]) {
+  const lengths = rows.map((row) => row[column]).filter((value) => !isNullLike(value, nullTokens)).map((value) => String(value).length);
   if (!lengths.length) return undefined;
   return { minLength: Math.min(...lengths), maxLength: Math.max(...lengths), meanLength: lengths.reduce((sum, value) => sum + value, 0) / lengths.length };
 }
 
-function dateStatistics(rows: DataRow[], column: string) {
-  const timestamps = rows.map((row) => row[column]).filter((value) => !isMissing(value)).map((value) => value instanceof Date ? value.getTime() : Date.parse(String(value))).filter(Number.isFinite).sort((a, b) => a - b);
+function dateStatistics(rows: DataRow[], column: string, nullTokens: readonly string[]) {
+  const timestamps = rows.map((row) => row[column]).filter((value) => !isNullLike(value, nullTokens)).map((value) => value instanceof Date ? value.getTime() : Date.parse(String(value))).filter(Number.isFinite).sort((a, b) => a - b);
   if (!timestamps.length) return undefined;
   return { min: new Date(timestamps[0]).toISOString(), max: new Date(timestamps[timestamps.length - 1]).toISOString(), rangeDays: (timestamps[timestamps.length - 1] - timestamps[0]) / 86_400_000 };
 }
 
-export function enrichColumnProfiles(rows: DataRow[], columns: ColumnProfile[]): ColumnProfile[] {
+export function enrichColumnProfiles(rows: DataRow[], columns: ColumnProfile[], configuredNullTokens?: readonly string[]): ColumnProfile[] {
+  const nullTokens = normalizeNullTokens(configuredNullTokens);
   return columns.map((column) => {
     const cardinalityRatio = rows.length ? column.distinctCount / rows.length : 0;
     const numeric = column.inferredType === 'integer' || column.inferredType === 'decimal';
-    const shape = numeric ? distributionShape(finiteNumbers(rows, column.name)) : {};
+    const shape = numeric ? distributionShape(finiteNumbers(rows, column.name, nullTokens)) : {};
     return {
       ...column,
       topValues: [],
@@ -61,8 +55,8 @@ export function enrichColumnProfiles(rows: DataRow[], columns: ColumnProfile[]):
       cardinalityRatio,
       classification: classification(column),
       numericStats: column.numericStats ? { ...column.numericStats, ...shape } : undefined,
-      textStats: column.inferredType === 'text' ? textStatistics(rows, column.name) : undefined,
-      dateStats: column.inferredType === 'date' ? dateStatistics(rows, column.name) : undefined,
+      textStats: column.inferredType === 'text' ? textStatistics(rows, column.name, nullTokens) : undefined,
+      dateStats: column.inferredType === 'date' ? dateStatistics(rows, column.name, nullTokens) : undefined,
     };
   });
 }
@@ -81,12 +75,13 @@ function pearson(left: Array<number | undefined>, right: Array<number | undefine
   return denominator ? numerator / denominator : undefined;
 }
 
-export function correlationProfile(rows: DataRow[], columns: ColumnProfile[]): CorrelationValue[] {
+export function correlationProfile(rows: DataRow[], columns: ColumnProfile[], configuredNullTokens?: readonly string[]): CorrelationValue[] {
+  const nullTokens = normalizeNullTokens(configuredNullTokens);
   const numericColumns = columns.filter((column) => column.inferredType === 'integer' || column.inferredType === 'decimal').slice(0, MAX_CORRELATION_COLUMNS);
   const values = new Map<string, Array<number | undefined>>();
   numericColumns.forEach((column) => values.set(column.name, rows.map((row) => {
     const value = row[column.name];
-    if (isMissing(value)) return undefined;
+    if (isNullLike(value, nullTokens)) return undefined;
     const numeric = Number(value);
     return Number.isFinite(numeric) ? numeric : undefined;
   })));
@@ -105,10 +100,11 @@ function memoryUsageMB(rows: DataRow[]): number {
   catch { return 0; }
 }
 
-export function enhanceProfileRun(rows: DataRow[], run: ProfileRun): ProfileRun {
-  const columns = enrichColumnProfiles(rows, run.columns);
+export function enhanceProfileRun(rows: DataRow[], run: ProfileRun, configuredNullTokens?: readonly string[]): ProfileRun {
+  const nullTokens = normalizeNullTokens(configuredNullTokens ?? run.nullTokens);
+  const columns = enrichColumnProfiles(rows, run.columns, nullTokens);
   const numericColumnCount = columns.filter((column) => column.inferredType === 'integer' || column.inferredType === 'decimal').length;
-  return { ...run, columns, memoryUsageMB: memoryUsageMB(rows), numericColumnCount, otherColumnCount: Math.max(0, columns.length - numericColumnCount), correlations: correlationProfile(rows, columns) };
+  return { ...run, nullTokens, columns, memoryUsageMB: memoryUsageMB(rows), numericColumnCount, otherColumnCount: Math.max(0, columns.length - numericColumnCount), correlations: correlationProfile(rows, columns, nullTokens) };
 }
 
 export function classificationLabel(type: DataType, column?: ColumnProfile): string {
