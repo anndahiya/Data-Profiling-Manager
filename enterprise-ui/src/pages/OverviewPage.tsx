@@ -1,6 +1,6 @@
 import { BellRing, Check, ChevronRight, Database, Plus, ShieldCheck, TableProperties, UploadCloud } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { AssetTable, EmptyState, MetricCard, PageHeader } from '../components';
 import { hasGovernedQuality } from '../scoring';
 import type { ProfileRun, WorkspaceSnapshot } from '../types';

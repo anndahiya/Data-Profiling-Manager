@@ -26,6 +26,17 @@ jobs:
           cache-dependency-path: enterprise-ui/package-lock.json
       - name: Install frozen dependencies
         run: npm ci --no-fund
+      - name: Capture dependency audit report
+        shell: bash
+        run: npm audit --json > npm-audit.json || true
+      - name: Upload dependency audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: enterprise-ui-npm-audit
+          path: enterprise-ui/npm-audit.json
+          if-no-files-found: error
+          retention-days: 7
       - name: Audit high-severity dependency findings
         run: npm audit --audit-level=high
       - name: Run unit tests

@@ -67,3 +67,22 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: enterprise-ui
           command: deploy
+
+      - name: Smoke test production route
+        working-directory: .
+        shell: bash
+        env:
+          PRODUCTION_URL: https://data-profiling-manager.ann-dahiya.workers.dev/overview
+        run: |
+          for attempt in {1..12}; do
+            status=$(curl --location --silent --show-error --output /tmp/dpm.html --write-out "%{http_code}" "$PRODUCTION_URL" || true)
+            if [ "$status" = "200" ] && grep -q '<div id="root"' /tmp/dpm.html; then
+              echo "Production smoke test passed on attempt $attempt."
+              exit 0
+            fi
+            echo "Attempt $attempt returned HTTP $status; waiting for the deployment to propagate."
+            sleep 5
+          done
+          echo "::error::The deployed /overview route did not return the application shell."
+          cat /tmp/dpm.html 2>/dev/null || true
+          exit 1

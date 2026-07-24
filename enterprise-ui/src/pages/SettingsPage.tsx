@@ -1,10 +1,11 @@
-import { useRef, useState } from 'react';
-import { AlertTriangle, Check, FileBarChart, FileUp, ShieldCheck, Sparkles, Trash2, X } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { AlertTriangle, Archive, Check, FileBarChart, FileUp, ShieldCheck, Sparkles, Trash2, X } from 'lucide-react';
+import { useNavigate } from 'react-router';
 import { PageHeader } from '../components';
 import { clearWorkspace, db } from '../db';
 import { demoWorkspace } from '../demo';
-import type { WorkspaceSnapshot } from '../types';
+import { applyRetentionPolicy, normalizeWorkspaceSettings } from '../retention';
+import type { WorkspaceSettings, WorkspaceSnapshot } from '../types';
 
 function isWorkspaceSnapshot(value: unknown): value is WorkspaceSnapshot {
   if (!value || typeof value !== 'object') return false;
@@ -13,8 +14,8 @@ function isWorkspaceSnapshot(value: unknown): value is WorkspaceSnapshot {
 }
 
 async function replaceWorkspace(workspace: WorkspaceSnapshot): Promise<void> {
-  await db.transaction('rw', [db.datasets, db.runs, db.issues, db.rules, db.dimensions, db.monitors, db.connections, db.sourceHandles], async () => {
-    await Promise.all([db.datasets.clear(), db.runs.clear(), db.issues.clear(), db.rules.clear(), db.dimensions.clear(), db.monitors.clear(), db.connections.clear(), db.sourceHandles.clear()]);
+  await db.transaction('rw', [db.datasets, db.runs, db.issues, db.rules, db.dimensions, db.monitors, db.connections, db.sourceHandles, db.settings], async () => {
+    await Promise.all([db.datasets.clear(), db.runs.clear(), db.issues.clear(), db.rules.clear(), db.dimensions.clear(), db.monitors.clear(), db.connections.clear(), db.sourceHandles.clear(), db.settings.clear()]);
     await Promise.all([
       workspace.datasets.length ? db.datasets.bulkPut(workspace.datasets) : Promise.resolve(),
       workspace.runs.length ? db.runs.bulkPut(workspace.runs) : Promise.resolve(),
@@ -23,6 +24,7 @@ async function replaceWorkspace(workspace: WorkspaceSnapshot): Promise<void> {
       workspace.dimensions?.length ? db.dimensions.bulkPut(workspace.dimensions) : Promise.resolve(),
       workspace.monitors?.length ? db.monitors.bulkPut(workspace.monitors) : Promise.resolve(),
       workspace.connections?.length ? db.connections.bulkPut(workspace.connections) : Promise.resolve(),
+      workspace.settings ? db.settings.put(normalizeWorkspaceSettings(workspace.settings)) : Promise.resolve(),
     ]);
   });
 }
@@ -30,7 +32,10 @@ async function replaceWorkspace(workspace: WorkspaceSnapshot): Promise<void> {
 export function SettingsPage({ workspace, reload }: { workspace: WorkspaceSnapshot; reload: () => Promise<void> }) {
   const [confirming, setConfirming] = useState(false);
   const [message, setMessage] = useState('');
+  const [retention, setRetention] = useState<WorkspaceSettings>(normalizeWorkspaceSettings(workspace.settings));
   const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => setRetention(normalizeWorkspaceSettings(workspace.settings)), [workspace.settings]);
+
   const exportWorkspace = () => {
     const blob = new Blob([JSON.stringify(workspace, null, 2)], { type: 'application/json' });
     const anchor = document.createElement('a');
@@ -45,7 +50,7 @@ export function SettingsPage({ workspace, reload }: { workspace: WorkspaceSnapsh
     try {
       const parsed: unknown = JSON.parse(await file.text());
       if (!isWorkspaceSnapshot(parsed)) throw new Error('This file is not a valid Data Profiling Manager workspace backup.');
-      if (!window.confirm('Restore this backup and replace every asset, run, rule, issue, monitor, and connection currently stored in this browser?')) return;
+      if (!window.confirm('Restore this backup and replace every asset, run, rule, issue, monitor, connection, and retention setting currently stored in this browser?')) return;
       await replaceWorkspace(parsed);
       await reload();
       setMessage('Workspace backup restored. Linked local files and folders must be relinked because browser permissions are not portable.');
@@ -55,12 +60,33 @@ export function SettingsPage({ workspace, reload }: { workspace: WorkspaceSnapsh
       if (inputRef.current) inputRef.current.value = '';
     }
   };
+  const saveRetention = async () => {
+    const next = normalizeWorkspaceSettings({ ...retention, updatedAt: new Date().toISOString() });
+    await db.settings.put(next);
+    setRetention(next);
+    const result = await applyRetentionPolicy(next);
+    await reload();
+    setMessage(`Retention settings saved. ${result.deletedRuns} old run${result.deletedRuns === 1 ? '' : 's'} and ${result.deletedIssues} resolved issue${result.deletedIssues === 1 ? '' : 's'} removed.`);
+  };
+  const cleanNow = async () => {
+    const next = normalizeWorkspaceSettings({ ...retention, updatedAt: new Date().toISOString() });
+    await db.settings.put(next);
+    const result = await applyRetentionPolicy(next, true);
+    await reload();
+    setMessage(`Cleanup complete. ${result.deletedRuns} old run${result.deletedRuns === 1 ? '' : 's'} and ${result.deletedIssues} resolved issue${result.deletedIssues === 1 ? '' : 's'} removed.`);
+  };
   const clear = async () => { await clearWorkspace(); setConfirming(false); await reload(); };
+  const success = message.startsWith('Workspace backup restored') || message.startsWith('Retention settings saved') || message.startsWith('Cleanup complete');
+
   return <>
-    <PageHeader title="Settings" description="Manage local browser storage, privacy, backups, and demo data." />
-    {message && <div className={`alert ${message.startsWith('Workspace backup restored') ? 'success' : 'error'}`}>{message.startsWith('Workspace backup restored') ? <Check size={17} /> : <AlertTriangle size={17} />}{message}</div>}
-    <div className="settings-grid"><section className="panel"><div className="panel-heading"><div><h2>Privacy & storage</h2><p>This web build is local-first.</p></div><ShieldCheck size={22} className="accent-icon" /></div><ul className="check-list"><li><Check size={16} /> CSV and .xlsx files are processed in your browser.</li><li><Check size={16} /> Raw rows are not sent to a hosted application server.</li><li><Check size={16} /> Aggregate profiles can contain source-derived top values, ranges, patterns, SQL text, and contact metadata. Treat backups as potentially sensitive.</li><li><Check size={16} /> Aggregate profiles, rules, dimensions, issues, monitors, and non-secret database metadata are stored in IndexedDB.</li><li><Check size={16} /> Database usernames, passwords, private keys, tokens, and SMTP credentials stay in local or runner environment secrets.</li><li><Check size={16} /> A local or self-hosted agent executes database queries and unattended schedules; the browser never connects directly to company databases.</li></ul></section><section className="panel"><div className="panel-heading"><div><h2>Workspace data</h2><p>{workspace.datasets.length} assets · {workspace.runs.length} runs · {workspace.issues.length} issues · {(workspace.monitors ?? []).length} monitors · {(workspace.connections ?? []).length} database connections</p></div></div><div className="stack-actions"><button className="secondary-button" onClick={exportWorkspace}><FileBarChart size={16} /> Export workspace backup</button><button className="secondary-button" onClick={() => inputRef.current?.click()}><FileUp size={16} /> Restore workspace backup</button><input ref={inputRef} type="file" accept="application/json,.json" hidden onChange={(event) => void importWorkspace(event.target.files?.[0])} /><LoadDemoButton afterLoad={reload} /><button className="danger-button" onClick={() => setConfirming(true)}><Trash2 size={16} /> Clear local workspace</button></div></section></div>
-    {confirming && <ConfirmDialog title="Clear the entire local workspace?" body="This deletes every saved asset, profile run, issue, rule, dimension configuration, monitor, database connection metadata, and linked source from this browser. Download a backup first if you need to keep them." confirmLabel="Clear workspace" onCancel={() => setConfirming(false)} onConfirm={() => void clear()} />}
+    <PageHeader title="Settings" description="Manage local browser storage, privacy, backups, retention, and demo data." />
+    {message && <div className={`alert ${success ? 'success' : 'error'}`} role="status" aria-live="polite">{success ? <Check size={17} /> : <AlertTriangle size={17} />}{message}</div>}
+    <div className="settings-grid">
+      <section className="panel"><div className="panel-heading"><div><h2>Privacy & storage</h2><p>This web build is local-first.</p></div><ShieldCheck size={22} className="accent-icon" /></div><ul className="check-list"><li><Check size={16} /> CSV and .xlsx files are processed in your browser.</li><li><Check size={16} /> Raw rows are not sent to a hosted application server.</li><li><Check size={16} /> New browser profiles redact raw top-value text; older runs or backups may still contain source-derived aggregates, ranges, patterns, SQL text, and contact metadata.</li><li><Check size={16} /> Aggregate profiles, rules, dimensions, issues, monitors, and non-secret database metadata are stored in IndexedDB.</li><li><Check size={16} /> Database usernames, passwords, private keys, tokens, and SMTP credentials stay in local or runner environment secrets.</li><li><Check size={16} /> A local or self-hosted agent executes database queries and unattended schedules; the browser never connects directly to company databases.</li></ul></section>
+      <section className="panel"><div className="panel-heading"><div><h2>Workspace data</h2><p>{workspace.datasets.length} assets · {workspace.runs.length} runs · {workspace.issues.length} issues · {(workspace.monitors ?? []).length} monitors · {(workspace.connections ?? []).length} database connections</p></div></div><div className="stack-actions"><button className="secondary-button" onClick={exportWorkspace}><FileBarChart size={16} /> Export workspace backup</button><button className="secondary-button" onClick={() => inputRef.current?.click()}><FileUp size={16} /> Restore workspace backup</button><input ref={inputRef} type="file" accept="application/json,.json" hidden onChange={(event) => void importWorkspace(event.target.files?.[0])} /><LoadDemoButton afterLoad={reload} /><button className="danger-button" onClick={() => setConfirming(true)}><Trash2 size={16} /> Clear local workspace</button></div></section>
+      <section className="panel retention-panel"><div className="panel-heading"><div><h2>Retention & cleanup</h2><p>Keep the browser workspace useful without allowing history to grow forever.</p></div><Archive size={22} className="accent-icon" /></div><label className="checkbox-row"><input type="checkbox" checked={retention.autoCleanupEnabled} onChange={(event) => setRetention({ ...retention, autoCleanupEnabled: event.target.checked })} /><span><b>Automatically apply retention after profiling</b><small>Cleanup runs only after a successful saved profile.</small></span></label><div className="field-grid"><label className="field"><span>Runs retained per asset</span><input type="number" min="1" max="500" value={retention.maxRunsPerAsset} onChange={(event) => setRetention({ ...retention, maxRunsPerAsset: Number(event.target.value) })} /><small>Newest runs are retained. The current latest run is never removed.</small></label><label className="field"><span>Resolved issue retention (days)</span><input type="number" min="1" max="3650" value={retention.resolvedIssueRetentionDays} onChange={(event) => setRetention({ ...retention, resolvedIssueRetentionDays: Number(event.target.value) })} /><small>Open and acknowledged issues are never removed by retention.</small></label></div><div className="button-row"><button className="primary-button" onClick={() => void saveRetention()}>Save retention settings</button><button className="secondary-button" onClick={() => void cleanNow()}>Run cleanup now</button></div></section>
+    </div>
+    {confirming && <ConfirmDialog title="Clear the entire local workspace?" body="This deletes every saved asset, profile run, issue, rule, dimension configuration, monitor, database connection metadata, retention setting, and linked source from this browser. Download a backup first if you need to keep them." confirmLabel="Clear workspace" onCancel={() => setConfirming(false)} onConfirm={() => void clear()} />}
   </>;
 }
 
@@ -77,5 +103,7 @@ export function LoadDemoButton({ afterLoad }: { afterLoad?: () => Promise<void> 
 }
 
 export function ConfirmDialog({ title, body, confirmLabel, onCancel, onConfirm }: { title: string; body: string; confirmLabel: string; onCancel: () => void; onConfirm: () => void }) {
-  return <div className="modal-backdrop"><div className="modal-card small"><button className="modal-close" onClick={onCancel}><X size={18} /></button><div className="modal-icon danger"><Trash2 size={22} /></div><h2>{title}</h2><p>{body}</p><div className="modal-actions"><button className="ghost-button" onClick={onCancel}>Cancel</button><button className="danger-button" onClick={onConfirm}>{confirmLabel}</button></div></div></div>;
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => cancelRef.current?.focus(), []);
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}><div className="modal-card small" role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title"><button className="modal-close" aria-label="Close dialog" onClick={onCancel}><X size={18} /></button><div className="modal-icon danger"><Trash2 size={22} /></div><h2 id="confirm-dialog-title">{title}</h2><p>{body}</p><div className="modal-actions"><button ref={cancelRef} className="ghost-button" onClick={onCancel}>Cancel</button><button className="danger-button" onClick={onConfirm}>{confirmLabel}</button></div></div></div>;
 }

@@ -6,7 +6,7 @@ export type SourceMode = 'manual-upload' | 'linked-file' | 'linked-folder' | 'da
 export type DatabaseProvider = 'DB2' | 'PostgreSQL' | 'Snowflake' | 'Supabase';
 export type RuleSeverity = 'Critical' | 'High' | 'Medium' | 'Low' | 'Info';
 export type RuleType = 'not-null' | 'unique' | 'type' | 'pattern' | 'freshness' | 'range' | 'allowed-values' | 'min-length' | 'max-length';
-export type ScheduleCadence = 'Weekly' | 'Monthly' | 'Quarterly' | 'Yearly';
+export type ScheduleCadence = 'Daily' | 'Weekly' | 'Monthly' | 'Quarterly' | 'Yearly';
 export type DeliveryMode = 'every-run' | 'breach-only';
 export type ColumnClassification = 'Empty' | 'Constant' | 'Likely key' | 'Measure' | 'Date/time' | 'Boolean' | 'Categorical/other';
 export type QualityEvaluationStatus = 'governed' | 'not-evaluated' | 'legacy';
@@ -263,6 +263,21 @@ export interface Issue {
   metric?: string;
   currentValue?: string;
   previousValue?: string;
+  issueKey?: string;
+  firstDetectedAt?: string;
+  lastDetectedAt?: string;
+  occurrenceCount?: number;
+  resolvedAt?: string;
+  latestRunId?: string;
+}
+
+export interface WorkspaceSettings {
+  id: 'workspace';
+  autoCleanupEnabled: boolean;
+  maxRunsPerAsset: number;
+  resolvedIssueRetentionDays: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface WorkspaceSnapshot {
@@ -273,4 +288,5 @@ export interface WorkspaceSnapshot {
   dimensions?: QualityDimension[];
   monitors?: MonitorPolicy[];
   connections?: DatabaseConnection[];
+  settings?: WorkspaceSettings;
 }

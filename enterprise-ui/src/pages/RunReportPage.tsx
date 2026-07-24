@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { AlertTriangle, Download, FileJson2, LoaderCircle } from 'lucide-react';
-import { Navigate, useParams } from 'react-router-dom';
+import { Navigate, useParams } from 'react-router';
+import { AccessibleTabs, TabPanel } from '../AccessibleTabs';
 import { AdvancedProfileTable, CorrelationMatrix } from '../AdvancedProfileSections';
 import { DimensionBars, IssueTable, MetricCard, PageHeader } from '../components';
 import { downloadDataQualityReport, downloadTechnicalProfile } from '../reportExport';
@@ -16,47 +17,34 @@ export function RunReportPage({ workspace }: { workspace: WorkspaceSnapshot }) {
   const [tab, setTab] = useState('Summary');
   const [downloading, setDownloading] = useState(false);
   if (!run || !dataset) return <Navigate to="/history" replace />;
-  const issues = workspace.issues.filter((issue) => issue.runId === run.id);
+  const issues = workspace.issues.filter((issue) => issue.runId === run.id || issue.latestRunId === run.id);
   const governed = hasGovernedQuality(run.quality);
   const strictScore = recordComplianceScore(run.quality);
   const constantColumns = run.columns.filter((column) => column.classification === 'Constant').length;
   const keyCandidates = run.columns.filter((column) => column.classification === 'Likely key' || column.likelyKey).length;
-  const previousRun = workspace.runs
-    .filter((item) => item.datasetId === run.datasetId && item.createdAt < run.createdAt)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  const previousRun = workspace.runs.filter((item) => item.datasetId === run.datasetId && item.createdAt < run.createdAt).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
   const monitor = workspace.monitors?.find((policy) => policy.datasetId === run.datasetId);
   const rules = run.quality.evaluationSnapshot?.rules ?? workspace.rules.filter((rule) => rule.datasetId === run.datasetId);
   const dimensions = run.quality.evaluationSnapshot?.dimensions ?? workspace.dimensions;
+  const tabs = ['Summary', 'Column profiles', 'Advanced profile', 'Correlation', 'Data quality', 'Issues'];
 
   const downloadReport = async () => {
     setDownloading(true);
-    try {
-      await downloadDataQualityReport({ dataset, run, issues, previousRun, monitor: governed ? monitor : undefined, rules, dimensions });
-    } finally {
-      setDownloading(false);
-    }
+    try { await downloadDataQualityReport({ dataset, run, issues, previousRun, monitor: governed ? monitor : undefined, rules, dimensions }); }
+    finally { setDownloading(false); }
   };
 
   return <>
-    <PageHeader
-      backTo="/history"
-      eyebrow={`${dataset.name} · Profiling run`}
-      title={run.fileName}
-      description={`${formatDate(run.createdAt)} · ${run.sourceKind}`}
-      actions={<div className="button-row"><button className="primary-button" disabled={downloading} onClick={() => void downloadReport()}>{downloading ? <LoaderCircle className="spin" size={16} /> : <Download size={16} />} {downloading ? 'Building report…' : 'Download DQ report'}</button><button className="secondary-button" onClick={() => downloadTechnicalProfile(dataset, run, issues)}><FileJson2 size={16} /> Export JSON</button></div>}
-    />
+    <PageHeader backTo="/history" eyebrow={`${dataset.name} · Profiling run`} title={run.fileName} description={`${formatDate(run.createdAt)} · ${run.sourceKind}`} actions={<div className="button-row"><button className="primary-button" disabled={downloading} onClick={() => void downloadReport()}>{downloading ? <LoaderCircle className="spin" size={16} /> : <Download size={16} />} {downloading ? 'Building report…' : 'Download DQ report'}</button><button className="secondary-button" onClick={() => downloadTechnicalProfile(dataset, run, issues)}><FileJson2 size={16} /> Export JSON</button></div>} />
     {!governed && <div className="alert warning"><AlertTriangle size={17} /><span>No applicable governed rules were evaluated. Profiling results are available, but the DQ score and all-rules compliance are N/A.</span></div>}
     {run.quality.skippedRules?.length ? <div className="alert warning"><AlertTriangle size={17} /><span>{run.quality.skippedRules.length} configured rule{run.quality.skippedRules.length === 1 ? ' was' : 's were'} skipped because a required column or enabled dimension was unavailable.</span></div> : null}
     <div className="metric-grid five"><MetricCard label="Rows" value={run.rowCount.toLocaleString()} /><MetricCard label="Columns" value={String(run.columnCount)} /><MetricCard label="Duplicate rows" value={run.duplicateRows.toLocaleString()} /><MetricCard label="Overall quality" value={governed ? `${run.quality.overallScore.toFixed(1)}%` : 'N/A'} detail={governed ? 'Weighted governed rules and dimensions' : 'No governed evaluation'} /><MetricCard label="Records passing all rules" value={governed ? `${strictScore.toFixed(1)}%` : 'N/A'} detail={governed ? 'Records passing every active rule' : 'No governed evaluation'} /></div>
-    <div className="tabs">{['Summary', 'Column profiles', 'Advanced profile', 'Correlation', 'Data quality', 'Issues'].map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item}</button>)}</div>
-    {tab === 'Summary' && <div className="two-column">
-      <section className="panel"><div className="panel-heading"><div><h2>Run summary</h2><p>Deterministic profile and governed rule evaluation</p></div></div><dl className="detail-list"><div><dt>Data asset</dt><dd>{dataset.name}</dd></div><div><dt>Estimated serialized data size</dt><dd>{run.memoryUsageMB === undefined ? 'Not captured for this older run' : `${run.memoryUsageMB.toFixed(2)} MB`}</dd></div><div><dt>Numeric columns</dt><dd>{run.numericColumnCount ?? run.columns.filter((column) => column.inferredType === 'integer' || column.inferredType === 'decimal').length}</dd></div><div><dt>Other columns</dt><dd>{run.otherColumnCount ?? run.columns.filter((column) => column.inferredType !== 'integer' && column.inferredType !== 'decimal').length}</dd></div><div><dt>Constant columns</dt><dd>{constantColumns}</dd></div><div><dt>Likely keys</dt><dd>{keyCandidates}</dd></div><div><dt>Rules evaluated</dt><dd>{run.quality.rulesEvaluated}</dd></div><div><dt>Overall scoring</dt><dd>{scoringDescription(run.quality)}</dd></div><div><dt>DQ engine</dt><dd>{run.quality.engineVersion ?? 'Legacy run'}</dd></div><div><dt>Configuration fingerprint</dt><dd><code>{run.quality.configurationFingerprint ?? 'Not retained'}</code></dd></div></dl></section>
-      <section className="panel"><div className="panel-heading"><div><h2>Quality dimensions</h2><p>{governed ? 'Weighted rule pass rates by contributing dimension' : 'No dimensions contributed to an official DQ score'}</p></div></div>{governed ? <DimensionBars dimensions={run.quality.dimensions} /> : <p className="muted">Create and enable governed rules, then run the profile again.</p>}</section>
-    </div>}
-    {tab === 'Column profiles' && <ColumnProfileTable run={run} />}
-    {tab === 'Advanced profile' && <AdvancedProfileTable run={run} />}
-    {tab === 'Correlation' && <CorrelationMatrix run={run} />}
-    {tab === 'Data quality' && <div className="two-column"><section className="panel"><div className="panel-heading"><div><h2>Overall quality</h2><p>Weighted average of active governed rules and dimension weights.</p></div></div><div className="hero-score"><strong>{governed ? `${run.quality.overallScore.toFixed(1)}%` : 'N/A'}</strong><span>{governed ? `Records passing all active rules: ${strictScore.toFixed(1)}%` : 'No official DQ evaluation was performed.'}</span></div></section><section className="panel"><div className="panel-heading"><div><h2>Dimension results</h2><p>A zero-scoring dimension lowers the overall score according to its weight; it does not automatically replace the entire score.</p></div></div>{governed ? <DimensionBars dimensions={run.quality.dimensions} /> : <p className="muted">No applicable governed rules were evaluated.</p>}</section>{run.quality.ruleResults?.length ? <section className="panel" style={{ gridColumn: '1 / -1' }}><div className="panel-heading"><div><h2>Rule results</h2><p>Each rule is compared with its configured issue threshold.</p></div></div><div className="table-wrap"><table><thead><tr><th>Rule</th><th>Dimension</th><th>Score</th><th>Threshold</th><th>Weight</th><th>Failed records</th></tr></thead><tbody>{run.quality.ruleResults.map((rule) => <tr key={rule.ruleId}><td><strong>{rule.ruleName}</strong></td><td><span className="category-chip">{rule.dimension}</span></td><td>{rule.score.toFixed(1)}%</td><td>{rule.threshold.toFixed(1)}%</td><td>{rule.weight}</td><td>{rule.failingRecords.toLocaleString()}</td></tr>)}</tbody></table></div></section> : null}</div>}
-    {tab === 'Issues' && <IssueTable issues={issues} />}
+    <AccessibleTabs items={tabs} value={tab} onChange={setTab} label="Profiling run report sections" idPrefix="run-report" />
+    <TabPanel tab="Summary" active={tab} idPrefix="run-report"><div className="two-column"><section className="panel"><div className="panel-heading"><div><h2>Run summary</h2><p>Deterministic profile and governed rule evaluation</p></div></div><dl className="detail-list"><div><dt>Data asset</dt><dd>{dataset.name}</dd></div><div><dt>Estimated serialized data size</dt><dd>{run.memoryUsageMB === undefined ? 'Not captured for this older run' : `${run.memoryUsageMB.toFixed(2)} MB`}</dd></div><div><dt>Numeric columns</dt><dd>{run.numericColumnCount ?? run.columns.filter((column) => column.inferredType === 'integer' || column.inferredType === 'decimal').length}</dd></div><div><dt>Other columns</dt><dd>{run.otherColumnCount ?? run.columns.filter((column) => column.inferredType !== 'integer' && column.inferredType !== 'decimal').length}</dd></div><div><dt>Constant columns</dt><dd>{constantColumns}</dd></div><div><dt>Likely keys</dt><dd>{keyCandidates}</dd></div><div><dt>Rules evaluated</dt><dd>{run.quality.rulesEvaluated}</dd></div><div><dt>Overall scoring</dt><dd>{scoringDescription(run.quality)}</dd></div><div><dt>DQ engine</dt><dd>{run.quality.engineVersion ?? 'Legacy run'}</dd></div><div><dt>Configuration fingerprint</dt><dd><code>{run.quality.configurationFingerprint ?? 'Not retained'}</code></dd></div></dl></section><section className="panel"><div className="panel-heading"><div><h2>Quality dimensions</h2><p>{governed ? 'Weighted rule pass rates by contributing dimension' : 'No dimensions contributed to an official DQ score'}</p></div></div>{governed ? <DimensionBars dimensions={run.quality.dimensions} /> : <p className="muted">Create and enable governed rules, then run the profile again.</p>}</section></div></TabPanel>
+    <TabPanel tab="Column profiles" active={tab} idPrefix="run-report"><ColumnProfileTable run={run} /></TabPanel>
+    <TabPanel tab="Advanced profile" active={tab} idPrefix="run-report"><AdvancedProfileTable run={run} /></TabPanel>
+    <TabPanel tab="Correlation" active={tab} idPrefix="run-report"><CorrelationMatrix run={run} /></TabPanel>
+    <TabPanel tab="Data quality" active={tab} idPrefix="run-report"><div className="two-column"><section className="panel"><div className="panel-heading"><div><h2>Overall quality</h2><p>Weighted average of active governed rules and dimension weights.</p></div></div><div className="hero-score"><strong>{governed ? `${run.quality.overallScore.toFixed(1)}%` : 'N/A'}</strong><span>{governed ? `Records passing all active rules: ${strictScore.toFixed(1)}%` : 'No official DQ evaluation was performed.'}</span></div></section><section className="panel"><div className="panel-heading"><div><h2>Dimension results</h2><p>A zero-scoring dimension lowers the overall score according to its weight; it does not automatically replace the entire score.</p></div></div>{governed ? <DimensionBars dimensions={run.quality.dimensions} /> : <p className="muted">No applicable governed rules were evaluated.</p>}</section>{run.quality.ruleResults?.length ? <section className="panel" style={{ gridColumn: '1 / -1' }}><div className="panel-heading"><div><h2>Rule results</h2><p>Each rule is compared with its configured issue threshold.</p></div></div><div className="table-wrap"><table><thead><tr><th>Rule</th><th>Dimension</th><th>Score</th><th>Threshold</th><th>Weight</th><th>Failed records</th></tr></thead><tbody>{run.quality.ruleResults.map((rule) => <tr key={rule.ruleId}><td><strong>{rule.ruleName}</strong></td><td><span className="category-chip">{rule.dimension}</span></td><td>{rule.score.toFixed(1)}%</td><td>{rule.threshold.toFixed(1)}%</td><td>{rule.weight}</td><td>{rule.failingRecords.toLocaleString()}</td></tr>)}</tbody></table></div></section> : null}</div></TabPanel>
+    <TabPanel tab="Issues" active={tab} idPrefix="run-report"><IssueTable issues={issues} /></TabPanel>
   </>;
 }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { db } from './db';
 import { createDefaultDimensions } from './quality';
+import { ensureWorkspaceSettings } from './retention';
 import type { WorkspaceSnapshot } from './types';
 
 export function useWorkspace() {
@@ -9,10 +10,11 @@ export function useWorkspace() {
 
   const reload = useCallback(async () => {
     if (await db.dimensions.count() === 0) await db.dimensions.bulkPut(createDefaultDimensions());
+    const settings = await ensureWorkspaceSettings();
     const [datasets, runs, issues, rules, dimensions, monitors, connections] = await Promise.all([
       db.datasets.toArray(), db.runs.toArray(), db.issues.toArray(), db.rules.toArray(), db.dimensions.toArray(), db.monitors.toArray(), db.connections.toArray(),
     ]);
-    setWorkspace({ datasets, runs, issues, rules, dimensions, monitors, connections });
+    setWorkspace({ datasets, runs, issues, rules, dimensions, monitors, connections, settings });
     setLoading(false);
   }, []);
 

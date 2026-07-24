@@ -1,13 +1,13 @@
-import { useEffect, useState } from 'react';
-import { AlertTriangle, RefreshCw, Sparkles } from 'lucide-react';
-import { useLocation, useNavigate } from 'react-router-dom';
-import { enhanceProfileRun } from '../advancedProfiler';
-import { profileBrowserRows } from '../browserProfiler';
+import { useEffect, useRef, useState } from 'react';
+import { AlertTriangle, RefreshCw, Sparkles, X } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router';
 import { PageHeader } from '../components';
 import { db } from '../db';
-import { parseBrowserFile } from '../fileParser';
+import { reconcileIssueSet } from '../issueLifecycle';
 import { compareSchema, createIssues } from '../profiler';
-import { createQualityIssues, evaluateConfiguredQuality } from '../quality';
+import { startProfileWorker, type ProfileWorkerJob } from '../profileWorkerClient';
+import { createQualityIssues } from '../quality';
+import { applyRetentionPolicy } from '../retention';
 import { SourcePicker } from '../SourcePicker';
 import { pickLinkedDirectory, pickLinkedFile, resolveLinkedSource, supportsPersistentFileAccess } from '../sources';
 import type { Dataset, DatasetSource, LinkedSourceHandle, ProfileRun, SchemaDiff, SourceMode, WorkspaceSnapshot } from '../types';
@@ -29,11 +29,14 @@ export function ProfilePage({ workspace, reload }: { workspace: WorkspaceSnapsho
   const [filePattern, setFilePattern] = useState('*.csv');
   const [selectionStrategy, setSelectionStrategy] = useState<NonNullable<DatasetSource['selectionStrategy']>>('latest-modified');
   const [processing, setProcessing] = useState(false);
+  const [progress, setProgress] = useState('');
   const [linking, setLinking] = useState(false);
   const [error, setError] = useState('');
   const [pending, setPending] = useState<PendingRun | null>(null);
+  const jobRef = useRef<ProfileWorkerJob | null>(null);
   const selectedDataset = workspace.datasets.find((dataset) => dataset.id === datasetId);
 
+  useEffect(() => () => jobRef.current?.cancel(), []);
   useEffect(() => {
     let active = true;
     const load = async () => {
@@ -65,17 +68,22 @@ export function ProfilePage({ workspace, reload }: { workspace: WorkspaceSnapsho
   const commitRun = async (run: ProfileRun, dataset: Dataset, handle?: LinkedSourceHandle) => {
     const previous = latestRunFor(dataset.id, workspace.runs);
     const observabilityIssues = createIssues(dataset, run, previous).filter((issue) => issue.category !== 'Data quality');
-    const qualityIssues = createQualityIssues(dataset.id, run.id, run.createdAt, run.quality);
-    const activeBreachMetrics = new Set(qualityIssues.map((issue) => issue.metric).filter(Boolean));
-    await db.transaction('rw', db.datasets, db.runs, db.issues, db.sourceHandles, async () => {
+    const qualityIssues = createQualityIssues(dataset.id, run.id, run.createdAt, run.quality).map((issue) => {
+      const result = run.quality.ruleResults?.find((item) => item.ruleName === issue.metric);
+      return { ...issue, issueKey: `dq:${result?.ruleId ?? issue.metric ?? issue.id}` };
+    });
+    const generatedIssues = [...observabilityIssues, ...qualityIssues];
+
+    await db.transaction('rw', [db.datasets, db.runs, db.issues, db.sourceHandles], async () => {
       await db.datasets.put({ ...dataset, latestRunId: run.id, updatedAt: run.createdAt });
       await db.runs.put(run);
-      const priorQualityIssues = await db.issues.where('datasetId').equals(dataset.id).filter((issue) => issue.category === 'Data quality' && (issue.status === 'Open' || issue.status === 'Acknowledged')).toArray();
-      await Promise.all(priorQualityIssues.filter((issue) => issue.metric && !activeBreachMetrics.has(issue.metric)).map((issue) => db.issues.update(issue.id, { status: 'Resolved' })));
-      if (observabilityIssues.length || qualityIssues.length) await db.issues.bulkPut([...observabilityIssues, ...qualityIssues]);
+      const existingIssues = await db.issues.where('datasetId').equals(dataset.id).toArray();
+      const plan = reconcileIssueSet(existingIssues, generatedIssues, run.id, run.createdAt, ['Data quality', 'Schema change', 'Record volume', 'Anomaly']);
+      if (plan.upserts.length || plan.resolutions.length) await db.issues.bulkPut([...plan.upserts, ...plan.resolutions]);
       if (handle) await db.sourceHandles.put({ ...handle, datasetId: dataset.id, updatedAt: run.createdAt });
       else if (dataset.source?.mode === 'manual-upload') await db.sourceHandles.delete(dataset.id);
     });
+    await applyRetentionPolicy(workspace.settings);
     await reload(); navigate(`/runs/${run.id}`);
   };
 
@@ -101,7 +109,7 @@ export function ProfilePage({ workspace, reload }: { workspace: WorkspaceSnapsho
 
   const handleProfile = async () => {
     if (!name.trim()) return;
-    setProcessing(true); setError('');
+    setProcessing(true); setProgress('Preparing the profiling worker…'); setError('');
     try {
       const targetId = selectedDataset?.id ?? crypto.randomUUID();
       const source = sourceConfig();
@@ -116,14 +124,12 @@ export function ProfilePage({ workspace, reload }: { workspace: WorkspaceSnapsho
         sourceKind = sourceMode === 'linked-folder' ? 'Linked folder' : 'Linked file';
         storedHandle = { ...linkedHandle, datasetId: targetId };
       }
-      const parsed = await parseBrowserFile(selectedFile);
-      const baseRun = enhanceProfileRun(parsed.rows, profileBrowserRows(parsed.rows, targetId, selectedFile.name, sourceKind));
       const configuredRules = workspace.rules.filter((rule) => rule.datasetId === targetId);
-      const run: ProfileRun = {
-        ...baseRun,
-        sourceReference,
-        quality: evaluateConfiguredQuality(parsed.rows, baseRun.columns, configuredRules, workspace.dimensions),
-      };
+      const job = startProfileWorker({ file: selectedFile, datasetId: targetId, sourceKind, rules: configuredRules, dimensions: workspace.dimensions }, setProgress);
+      jobRef.current = job;
+      const workerRun = await job.promise;
+      jobRef.current = null;
+      const run: ProfileRun = { ...workerRun, sourceReference };
       const diff = compareSchema(selectedDataset ? latestRunFor(selectedDataset.id, workspace.runs) : undefined, run.columns);
       if (selectedDataset && diff.hasChanges) setPending({ run, diff, existing: selectedDataset, source, handle: storedHandle });
       else {
@@ -131,10 +137,17 @@ export function ProfilePage({ workspace, reload }: { workspace: WorkspaceSnapsho
         const dataset = selectedDataset ? { ...selectedDataset, source } : { id: targetId, name: name.trim(), owner: owner.trim(), description: description.trim(), tags: [], createdAt: now, updatedAt: now, source };
         await commitRun(run, dataset, storedHandle);
       }
-    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Profiling failed.'); }
-    finally { setProcessing(false); }
+    } catch (caught) {
+      if (caught instanceof DOMException && caught.name === 'AbortError') setError('Profiling was cancelled. No run was saved.');
+      else setError(caught instanceof Error ? caught.message : 'Profiling failed.');
+    } finally {
+      jobRef.current = null;
+      setProcessing(false);
+      setProgress('');
+    }
   };
 
+  const cancelProfile = () => jobRef.current?.cancel();
   const saveAsNew = async () => {
     if (!pending) return;
     const now = new Date().toISOString(); const newId = crypto.randomUUID();
@@ -148,17 +161,19 @@ export function ProfilePage({ workspace, reload }: { workspace: WorkspaceSnapsho
   const governedEvaluation = configuredRuleCount > 0;
   return <>
     <PageHeader title="Profile data" description="Upload once, link a file, or link a versioned folder so future runs can reuse the same source." />
-    {error && <div className="alert error"><AlertTriangle size={17} />{error}</div>}
+    {error && <div className="alert error" role="alert" aria-live="assertive"><AlertTriangle size={17} />{error}</div>}
     {!governedEvaluation && <div className="alert warning"><AlertTriangle size={17} /><span>The data profile will run, but the official DQ score will show N/A until you add and enable governed rules for this asset. Profiling-based suggestions remain recommendations only.</span></div>}
     <div className="wizard-grid">
-      <section className="panel form-panel"><div className="step-label"><span>1</span> Select destination</div><label className="field"><span>Data asset</span><select value={datasetId} onChange={(event) => setDatasetId(event.target.value)}><option value="new">Create a new asset</option>{workspace.datasets.map((dataset) => <option value={dataset.id} key={dataset.id}>{dataset.name}</option>)}</select></label><div className="field-grid"><label className="field"><span>Asset name</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Customer master" /></label><label className="field"><span>Owner / steward</span><input value={owner} onChange={(event) => setOwner(event.target.value)} placeholder="Customer Data Office" /></label></div><label className="field"><span>Description</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What this dataset contains and where it is used" /></label></section>
-      <SourcePicker sourceMode={sourceMode} setSourceMode={(value) => { setSourceMode(value); setError(''); }} file={file} setFile={setFile} sourceLabel={sourceLabel} filePattern={filePattern} setFilePattern={setFilePattern} selectionStrategy={selectionStrategy} setSelectionStrategy={setSelectionStrategy} persistentAccessSupported={supportsPersistentFileAccess()} linking={linking} chooseLinkedFile={() => void chooseFile()} chooseLinkedFolder={() => void chooseFolder()} />
+      <section className="panel form-panel"><div className="step-label"><span>1</span> Select destination</div><label className="field"><span>Data asset</span><select value={datasetId} disabled={processing} onChange={(event) => setDatasetId(event.target.value)}><option value="new">Create a new asset</option>{workspace.datasets.map((dataset) => <option value={dataset.id} key={dataset.id}>{dataset.name}</option>)}</select></label><div className="field-grid"><label className="field"><span>Asset name</span><input value={name} disabled={processing} onChange={(event) => setName(event.target.value)} placeholder="Customer master" /></label><label className="field"><span>Owner / steward</span><input value={owner} disabled={processing} onChange={(event) => setOwner(event.target.value)} placeholder="Customer Data Office" /></label></div><label className="field"><span>Description</span><textarea value={description} disabled={processing} onChange={(event) => setDescription(event.target.value)} placeholder="What this dataset contains and where it is used" /></label></section>
+      <SourcePicker sourceMode={sourceMode} setSourceMode={(value) => { if (!processing) { setSourceMode(value); setError(''); } }} file={file} setFile={setFile} sourceLabel={sourceLabel} filePattern={filePattern} setFilePattern={setFilePattern} selectionStrategy={selectionStrategy} setSelectionStrategy={setSelectionStrategy} persistentAccessSupported={supportsPersistentFileAccess()} linking={linking || processing} chooseLinkedFile={() => void chooseFile()} chooseLinkedFolder={() => void chooseFolder()} />
     </div>
-    <div className="sticky-action"><div><strong>{sourceMode === 'manual-upload' ? 'Ready to profile?' : 'Ready to refresh this asset?'}</strong><span>{sourceMode === 'linked-folder' ? `The app will select the ${selectionStrategy === 'latest-modified' ? 'most recently modified' : 'highest-version'} file matching ${filePattern || '*'}.` : sourceMode === 'linked-file' ? 'The app will read the latest saved contents of the linked file.' : governedEvaluation ? `${configuredRuleCount} governed rules will be evaluated.` : 'The profile will be saved without an official DQ score.'}</span></div><button className="primary-button" disabled={!canRun || processing} onClick={() => void handleProfile()}>{processing ? <RefreshCw className="spin" size={17} /> : <Sparkles size={17} />} {processing ? 'Profiling…' : governedEvaluation ? 'Run profile & DQ evaluation' : 'Run profile'}</button></div>
+    <div className="sticky-action" aria-live="polite"><div><strong>{processing ? 'Profiling in the background' : sourceMode === 'manual-upload' ? 'Ready to profile?' : 'Ready to refresh this asset?'}</strong><span>{processing ? progress : sourceMode === 'linked-folder' ? `The app will select the ${selectionStrategy === 'latest-modified' ? 'most recently modified' : 'highest-version'} file matching ${filePattern || '*'}.` : sourceMode === 'linked-file' ? 'The app will read the latest saved contents of the linked file.' : governedEvaluation ? `${configuredRuleCount} governed rules will be evaluated.` : 'The profile will be saved without an official DQ score.'}</span></div><div className="button-row">{processing && <button className="secondary-button" onClick={cancelProfile}><X size={16} /> Cancel</button>}<button className="primary-button" disabled={!canRun || processing} onClick={() => void handleProfile()}>{processing ? <RefreshCw className="spin" size={17} /> : <Sparkles size={17} />} {processing ? 'Profiling…' : governedEvaluation ? 'Run profile & DQ evaluation' : 'Run profile'}</button></div></div>
     {pending && <SchemaDialog diff={pending.diff} onCancel={() => setPending(null)} onContinue={() => void commitRun(pending.run, { ...pending.existing!, source: pending.source }, pending.handle)} onSaveNew={() => void saveAsNew()} />}
   </>;
 }
 
 function SchemaDialog({ diff, onCancel, onContinue, onSaveNew }: { diff: SchemaDiff; onCancel: () => void; onContinue: () => void; onSaveNew: () => void }) {
-  return <div className="modal-backdrop"><div className="modal-card"><div className="modal-icon warning"><AlertTriangle size={23} /></div><h2>This file does not match the saved schema</h2><p>The run may be intentional for schema-change analysis, or it may have been assigned to the wrong asset. Review the differences before continuing.</p><div className="schema-summary"><div><strong>{diff.added.length}</strong><span>Added columns</span></div><div><strong>{diff.removed.length}</strong><span>Removed columns</span></div><div><strong>{diff.changed.length}</strong><span>Datatype changes</span></div></div><div className="schema-diff-list">{diff.added.map((item) => <div key={`a-${item}`}><span className="diff-icon added">+</span><b>{item}</b><em>Added</em></div>)}{diff.removed.map((item) => <div key={`r-${item}`}><span className="diff-icon removed">−</span><b>{item}</b><em>Removed</em></div>)}{diff.changed.map((item) => <div key={`c-${item.name}`}><span className="diff-icon changed">↔</span><b>{item.name}</b><em>{item.before} → {item.after}</em></div>)}</div><div className="modal-actions"><button className="ghost-button" onClick={onCancel}>Cancel</button><button className="secondary-button" onClick={onSaveNew}>Save as a new asset</button><button className="primary-button" onClick={onContinue}>Continue and record schema change</button></div></div></div>;
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => cancelRef.current?.focus(), []);
+  return <div className="modal-backdrop" role="presentation"><div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="schema-dialog-title"><div className="modal-icon warning"><AlertTriangle size={23} /></div><h2 id="schema-dialog-title">This file does not match the saved schema</h2><p>The run may be intentional for schema-change analysis, or it may have been assigned to the wrong asset. Review the differences before continuing.</p><div className="schema-summary"><div><strong>{diff.added.length}</strong><span>Added columns</span></div><div><strong>{diff.removed.length}</strong><span>Removed columns</span></div><div><strong>{diff.changed.length}</strong><span>Datatype changes</span></div></div><div className="schema-diff-list">{diff.added.map((item) => <div key={`a-${item}`}><span className="diff-icon added">+</span><b>{item}</b><em>Added</em></div>)}{diff.removed.map((item) => <div key={`r-${item}`}><span className="diff-icon removed">−</span><b>{item}</b><em>Removed</em></div>)}{diff.changed.map((item) => <div key={`c-${item.name}`}><span className="diff-icon changed">↔</span><b>{item.name}</b><em>{item.before} → {item.after}</em></div>)}</div><div className="modal-actions"><button ref={cancelRef} className="ghost-button" onClick={onCancel}>Cancel</button><button className="secondary-button" onClick={onSaveNew}>Save as a new asset</button><button className="primary-button" onClick={onContinue}>Continue and record schema change</button></div></div></div>;
 }

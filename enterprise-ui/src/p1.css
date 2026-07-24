@@ -1,0 +1,51 @@
+.skip-link {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 1000;
+  transform: translateY(-160%);
+  padding: 10px 14px;
+  border-radius: 8px;
+  color: #fff;
+  background: #202235;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: 0 8px 24px rgba(0,0,0,.25);
+}
+.skip-link:focus { transform: translateY(0); }
+
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 3px solid rgba(91,91,214,.38);
+  outline-offset: 2px;
+}
+.main-shell:focus { outline: none; }
+[role="tabpanel"]:focus { outline: none; }
+
+.retention-panel { grid-column: 1 / -1; }
+.checkbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 18px;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--soft);
+}
+.checkbox-row input { margin-top: 3px; accent-color: var(--primary); }
+.checkbox-row span { display: grid; gap: 4px; }
+.checkbox-row small, .field small { color: var(--muted); font-size: 10px; line-height: 1.45; }
+
+.asset-header-actions { flex-wrap: wrap; justify-content: flex-end; }
+.delete-summary { grid-template-columns: repeat(5, minmax(0, 1fr)); margin-bottom: 16px; }
+.delete-confirm-field { margin-top: 18px; }
+.issue-filter-summary { margin: -6px 0 12px auto; width: fit-content; }
+
+.profile-table tbody tr[tabindex] { cursor: pointer; }
+.profile-table tbody tr[tabindex]:focus-visible { outline-offset: -3px; }
+
+@media (max-width: 900px) {
+  .retention-panel { grid-column: auto; }
+  .delete-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .asset-header-actions { justify-content: flex-start; }
+}
