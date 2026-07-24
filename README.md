@@ -13,16 +13,19 @@ The React/TypeScript application includes:
 - CSV, TXT, and `.xlsx` browser profiling
 - reusable linked-file and linked-folder sources in supported Chromium browsers
 - named data assets and historical profiling runs
+- asset metadata editing, per-asset backups, and controlled cascade deletion
 - schema-change warnings
 - advanced numerical, text, date, pattern, outlier, cardinality, and correlation profiles
 - governed quality dimensions and editable rules
 - weighted rule and dimension scoring
 - a separate records-passing-all-rules measure
-- issues, comparisons, and trends
+- recurring issue lifecycle with occurrence history and automatic resolution
+- comparisons and trends
 - formatted Excel DQ reports and technical JSON exports
-- monitoring thresholds, schedule configuration, and steward email settings
+- monitoring thresholds, daily/weekly/monthly/quarterly/yearly schedules, and steward email settings
 - PostgreSQL, Supabase, Snowflake, and DB2 metadata/configuration for local agents
-- browser-workspace backup, restore, demo data, and deletion
+- browser-workspace backup, restore, retention, cleanup, demo data, and deletion
+- background Web Worker profiling with progress and cancellation
 
 The older Streamlit edition remains in the repository for local and historical compatibility, but it is not the current Cloudflare interface.
 
@@ -43,13 +46,13 @@ Rule changes apply to future runs. They do not rewrite the evaluation configurat
 
 The Cloudflare application is local-first:
 
-- uploaded rows are parsed and profiled in the active browser
+- uploaded rows are parsed and profiled in a browser Web Worker
 - raw rows are not sent to a Data Profiling Manager application server
-- datasets, aggregate profiles, runs, issues, rules, dimensions, monitors, and non-secret connection metadata are stored in browser IndexedDB
+- datasets, aggregate profiles, runs, issues, rules, dimensions, monitors, settings, and non-secret connection metadata are stored in browser IndexedDB
 - database usernames, passwords, tokens, private keys, SMTP credentials, and Gemini credentials are not stored in browser connection records
 - new browser profiles redact raw top-value text before saving the profile
 - patterns, ranges, dates, counts, SQL queries, host metadata, steward addresses, and older imported profiles can still be sensitive
-- a workspace backup should therefore be treated as potentially sensitive
+- a workspace or asset backup should therefore be treated as potentially sensitive
 
 Browser data does not automatically sync between browsers or devices. Clearing site storage removes the workspace. Use **Settings → Export workspace backup** before clearing data or loading a demo over an existing workspace. Linked local file permissions cannot be transferred in a JSON backup and must be re-established after restore.
 
@@ -67,6 +70,8 @@ The hardened browser path supports:
 - up to 250 columns
 - correlations across up to the first 40 numerical columns
 
+The profiling pipeline runs outside the main UI thread. The browser displays progress and allows the user to cancel before a run is saved.
+
 Use the local Python edition for:
 
 - legacy `.xls`
@@ -77,6 +82,34 @@ Use the local Python edition for:
 - private database execution
 
 CSV source text is preserved during parsing, so values such as `00123` are not rewritten to `123` before profiling. The browser's conservative default missing markers are blank values, `null`, `n/a`, `nan`, and `(blank)`; business values such as `unknown`, `NA`, and `none` are retained as observed values in the hardened browser profiler.
+
+## Asset administration
+
+Each data asset can be edited, backed up, refreshed, or deleted.
+
+Deleting an asset requires typing its exact name and removes its browser-stored:
+
+- profile runs
+- issues
+- governed rules
+- monitoring policy
+- database connection metadata
+- linked file or folder handle
+
+Download the asset backup before deletion when its history may be needed later.
+
+## Issues and retention
+
+A recurring finding updates the existing active issue instead of adding a duplicate on every run. The issue stores its first detection, latest detection, occurrence count, current result, and status. Managed findings are resolved automatically when a later run no longer detects them.
+
+Workspace retention is configurable in Settings:
+
+- maximum saved runs per asset
+- number of days to retain resolved or closed issues
+- automatic cleanup after successful profiles
+- manual cleanup at any time
+
+Open and acknowledged issues are not deleted by the retention policy.
 
 ## Linked files and folders
 
@@ -91,11 +124,15 @@ A browser may ask the user to renew permission. Linked browser handles cannot ru
 
 The web application stores monitoring policy and exports runner configuration. It does not silently read a laptop or send email after the browser closes.
 
+Supported cadence options are daily, weekly, monthly, quarterly, and yearly. Quarterly schedules use the selected starting month.
+
 Exports include:
 
 - `schedule_config.csv`
 - `quality_config.json`
 - a generated GitHub Actions workflow
+
+The generated workflow defaults to a self-hosted Linux runner because local files, network shares, and private databases normally cannot be accessed from a public GitHub-hosted runner. It does not invent a recurring schedule when every monitor is paused.
 
 The Python scheduled agent can:
 
@@ -180,13 +217,13 @@ The local edition is appropriate when source files must remain on the machine ru
 
 ```bash
 cd enterprise-ui
-npm install
+npm ci
 npm test
 npm run build
 npm run dev
 ```
 
-Production deployment tests the web application, compiles the production bundle, audits high-severity dependencies, and deploys static assets through Wrangler.
+Production deployment installs the frozen dependency tree, audits high-severity dependencies, tests the web application, compiles the production bundle, deploys static assets through Wrangler, and smoke-tests the public `/overview` route.
 
 ## Python tests
 
@@ -197,9 +234,10 @@ python -m compileall -q .
 
 ## Important release behavior
 
-- Loading demo data replaces the existing browser workspace and now requires confirmation when work already exists.
+- Loading demo data replaces the existing browser workspace and requires confirmation when work already exists.
 - Workspace restore replaces the current browser workspace and also requires confirmation.
 - Deleting a database connection removes dependent monitor references and returns the linked asset to manual-upload mode.
+- Deleting a data asset cascades through its browser-stored runs, issues, rules, monitor, connection metadata, and linked source handle.
 - New browser profiles do not retain raw top values, but older runs and imported backups may still contain them.
 - The DQ score is not a universal certification that data is accurate or fit for every purpose; it is the result of the active governed rules and weights captured for that run.
 
