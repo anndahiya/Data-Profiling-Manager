@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, Check, ChevronRight, Trash2 } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { EmptyState, PageHeader, ScoreBadge } from '../components';
 import { db } from '../db';
 import { compareSchema } from '../profiler';

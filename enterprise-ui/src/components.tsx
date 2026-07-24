@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { ArrowLeft, Check, ChevronRight, Database, FileSearch, ShieldCheck } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { hasGovernedQuality } from './scoring';
 import type { DimensionResult, Issue, IssueStatus, ProfileRun, WorkspaceSnapshot } from './types';
 import { formatDate, latestRunFor } from './utils';

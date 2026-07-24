@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { AlertTriangle, Download, FileJson2, LoaderCircle } from 'lucide-react';
-import { Navigate, useParams } from 'react-router-dom';
+import { Navigate, useParams } from 'react-router';
 import { AccessibleTabs, TabPanel } from '../AccessibleTabs';
 import { AdvancedProfileTable, CorrelationMatrix } from '../AdvancedProfileSections';
 import { DimensionBars, IssueTable, MetricCard, PageHeader } from '../components';

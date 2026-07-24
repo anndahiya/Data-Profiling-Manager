@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { BellRing, BookOpenCheck, CalendarClock, CircleGauge, Columns3, Database, FileBarChart, History, Menu, Search, Settings, ShieldCheck, TrendingUp, TriangleAlert, UploadCloud, X } from 'lucide-react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router';
 import type { WorkspaceSnapshot } from './types';
 import { formatDate } from './utils';
 

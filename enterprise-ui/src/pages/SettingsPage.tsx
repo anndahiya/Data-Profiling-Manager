@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Archive, Check, FileBarChart, FileUp, ShieldCheck, Sparkles, Trash2, X } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { PageHeader } from '../components';
 import { clearWorkspace, db } from '../db';
 import { demoWorkspace } from '../demo';

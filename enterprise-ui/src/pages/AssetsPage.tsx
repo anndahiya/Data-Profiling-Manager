@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Database, Download, Pencil, Plus, RefreshCw, Search, Trash2, X } from 'lucide-react';
-import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useParams } from 'react-router';
 import { AccessibleTabs, TabPanel } from '../AccessibleTabs';
 import { AdvancedProfileTable, CorrelationMatrix } from '../AdvancedProfileSections';
 import { assetCascadeCounts, buildAssetBackup, deleteAssetCascade } from '../assetLifecycle';
