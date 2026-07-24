@@ -1,20 +1,12 @@
 import type {
-  ColumnProfile,
-  DataType,
-  DimensionResult,
-  Issue,
-  QualityDimension,
-  QualityRule,
-  QualitySummary,
-  RuleResult,
-  RuleSeverity,
-  SkippedQualityRule,
+  ColumnProfile, DataType, DimensionResult, Issue, QualityDimension, QualityRule, QualitySummary,
+  RuleResult, RuleSeverity, SkippedQualityRule,
 } from './types';
 import type { DataRow } from './profiler';
 
 const BASE_DATE = '2026-01-01T00:00:00.000Z';
 const QUALITY_ENGINE_VERSION = 'web-dq-2.0';
-const NULL_LIKE = new Set(['', 'null', 'none', 'n/a', 'na', 'nan', 'unknown', '(blank)']);
+const NULL_LIKE = new Set(['', 'null', 'n/a', 'nan', '(blank)']);
 
 export const DIMENSION_LIBRARY: QualityDimension[] = [
   { id: 'accuracy', name: 'Accuracy', description: 'Values correctly represent the real-world entity, event, or fact they describe.', weight: 1, enabled: true, source: 'Standard', createdAt: BASE_DATE, updatedAt: BASE_DATE },
@@ -40,9 +32,9 @@ function isNullLike(value: unknown): boolean {
 }
 
 function isDateShaped(text: string): boolean {
-  const numericDate = /^(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4})(?:[ T].*)?$/;
-  const isoTimestamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?$/i;
-  return (numericDate.test(text) || isoTimestamp.test(text)) && !Number.isNaN(Date.parse(text));
+  return /^(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4})(?:[ T].*)?$/.test(text)
+    || /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?$/i.test(text)
+    ? !Number.isNaN(Date.parse(text)) : false;
 }
 
 function inferValueType(value: unknown): DataType {
@@ -71,7 +63,7 @@ function valueKey(value: unknown): string {
 }
 
 function numberValue(value?: string): number | undefined {
-  if (value === undefined || value.trim() === '') return undefined;
+  if (!value?.trim()) return undefined;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
 }
@@ -89,7 +81,6 @@ function evaluateRule(rows: DataRow[], rule: QualityRule): boolean[] {
       return key !== '(null)' && (counts.get(key) ?? 0) === 1;
     });
   }
-
   return values.map((value) => {
     if (rule.ruleType === 'not-null') return !isNullLike(value);
     if (isNullLike(value)) return true;
@@ -109,10 +100,9 @@ function evaluateRule(rows: DataRow[], rule: QualityRule): boolean[] {
     }
     if (rule.ruleType === 'range') {
       const numeric = Number(value);
-      if (!Number.isFinite(numeric)) return false;
-      const min = numberValue(rule.expectedValue);
-      const max = numberValue(rule.secondaryValue);
-      return (min === undefined || numeric >= min) && (max === undefined || numeric <= max);
+      const minimum = numberValue(rule.expectedValue);
+      const maximum = numberValue(rule.secondaryValue);
+      return Number.isFinite(numeric) && (minimum === undefined || numeric >= minimum) && (maximum === undefined || numeric <= maximum);
     }
     if (rule.ruleType === 'allowed-values') {
       const allowed = new Set((rule.expectedValue ?? '').split(',').map((item) => item.trim().toLowerCase()).filter(Boolean));
@@ -145,32 +135,19 @@ function configurationFingerprint(rules: QualityRule[], dimensions: QualityDimen
 export function buildSuggestedRules(datasetId: string, columns: ColumnProfile[]): QualityRule[] {
   const createdAt = new Date().toISOString();
   const rules: QualityRule[] = [];
-  const add = (rule: Omit<QualityRule, 'id' | 'datasetId' | 'source' | 'createdAt'>) => rules.push({
-    ...rule,
-    id: crypto.randomUUID(),
-    datasetId,
-    source: 'Suggested',
-    createdAt,
-  });
-
+  const add = (rule: Omit<QualityRule, 'id' | 'datasetId' | 'source' | 'createdAt'>) => rules.push({ ...rule, id: crypto.randomUUID(), datasetId, source: 'Suggested', createdAt });
   columns.forEach((column) => {
     if (column.nonNullCount > 0 && column.missingPercentage <= 2) add({ name: `${column.name} is populated`, dimension: 'Completeness', columnName: column.name, ruleType: 'not-null', enabled: true, weight: 1, threshold: 95, severity: 'Medium' });
     if (column.inferredType !== 'empty') add({ name: `${column.name} has ${column.inferredType} values`, dimension: 'Validity', columnName: column.name, ruleType: 'type', expectedValue: column.inferredType, enabled: true, weight: 1, threshold: 95, severity: 'Medium' });
     if (column.likelyKey) add({ name: `${column.name} is unique`, dimension: 'Uniqueness', columnName: column.name, ruleType: 'unique', enabled: true, weight: 1, threshold: 100, severity: 'High' });
     if (column.inferredType === 'text' && column.dominantPattern && (column.dominantPatternPercentage ?? 0) >= 90) add({ name: `${column.name} follows its dominant pattern`, dimension: 'Consistency', columnName: column.name, ruleType: 'pattern', expectedValue: column.dominantPattern, enabled: true, weight: 1, threshold: 90, severity: 'Low' });
   });
-
   const dateCandidate = columns.find((column) => column.inferredType === 'date' && /(updated|modified|event|transaction|created|date|timestamp)/i.test(column.name));
   if (dateCandidate) add({ name: `${dateCandidate.name} is no more than 30 days old`, dimension: 'Timeliness', columnName: dateCandidate.name, ruleType: 'freshness', expectedValue: '30', enabled: true, weight: 1, threshold: 95, severity: 'Medium' });
   return rules;
 }
 
-export function evaluateConfiguredQuality(
-  rows: DataRow[],
-  columns: ColumnProfile[],
-  configuredRules: QualityRule[],
-  dimensions?: QualityDimension[],
-): QualitySummary {
+export function evaluateConfiguredQuality(rows: DataRow[], columns: ColumnProfile[], configuredRules: QualityRule[], dimensions?: QualityDimension[]): QualitySummary {
   const dimensionMap = activeDimensionMap(dimensions);
   const availableColumns = new Set(columns.map((column) => column.name));
   const skippedRules: SkippedQualityRule[] = [];
@@ -187,120 +164,60 @@ export function evaluateConfiguredQuality(
     return true;
   });
   const contributingDimensions = [...new Set(rules.map((rule) => rule.dimension.toLowerCase()))]
-    .map((name) => dimensionMap.get(name))
-    .filter((dimension): dimension is QualityDimension => Boolean(dimension))
-    .map((dimension) => ({ ...dimension }));
+    .map((name) => dimensionMap.get(name)).filter((item): item is QualityDimension => Boolean(item)).map((item) => ({ ...item }));
   const evaluatedAt = new Date().toISOString();
   const fingerprint = configurationFingerprint(rules, contributingDimensions);
-  const snapshot = {
-    version: 1 as const,
-    engineVersion: QUALITY_ENGINE_VERSION,
-    configurationFingerprint: fingerprint,
-    evaluatedAt,
-    rules: rules.map((rule) => ({ ...rule })),
-    dimensions: contributingDimensions,
+  const snapshot = { version: 1 as const, engineVersion: QUALITY_ENGINE_VERSION, configurationFingerprint: fingerprint, evaluatedAt, rules: rules.map((rule) => ({ ...rule })), dimensions: contributingDimensions };
+  if (!rules.length) return {
+    evaluatedRecords: rows.length, passingRecords: 0, failingRecords: 0, overallScore: 0, recordComplianceScore: 0,
+    dimensions: [], rulesEvaluated: 0, ruleResults: [], scoringMethod: 'weighted-rule-average', evaluationStatus: 'not-evaluated',
+    engineVersion: QUALITY_ENGINE_VERSION, configurationFingerprint: fingerprint, evaluationSnapshot: snapshot, skippedRules,
   };
-
-  if (!rules.length) {
-    return {
-      evaluatedRecords: rows.length,
-      passingRecords: 0,
-      failingRecords: 0,
-      overallScore: 0,
-      recordComplianceScore: 0,
-      dimensions: [],
-      rulesEvaluated: 0,
-      ruleResults: [],
-      scoringMethod: 'weighted-rule-average',
-      evaluationStatus: 'not-evaluated',
-      engineVersion: QUALITY_ENGINE_VERSION,
-      configurationFingerprint: fingerprint,
-      evaluationSnapshot: snapshot,
-      skippedRules,
-    };
-  }
 
   const evaluations = rules.map((rule) => {
     const passes = evaluateRule(rows, rule);
     const passingRecords = passes.filter(Boolean).length;
-    const failingRecords = rows.length - passingRecords;
     const result: RuleResult = {
-      ruleId: rule.id,
-      ruleName: rule.name,
-      dimension: rule.dimension,
-      columnName: rule.columnName,
-      ruleType: rule.ruleType,
-      expectedValue: rule.expectedValue,
-      secondaryValue: rule.secondaryValue,
-      passingRecords,
-      failingRecords,
-      score: rows.length ? (passingRecords / rows.length) * 100 : 100,
-      weight: Math.max(0, rule.weight ?? 1),
-      threshold: Math.min(100, Math.max(0, rule.threshold ?? 95)),
-      severity: rule.severity ?? 'Medium',
+      ruleId: rule.id, ruleName: rule.name, dimension: rule.dimension, columnName: rule.columnName, ruleType: rule.ruleType,
+      expectedValue: rule.expectedValue, secondaryValue: rule.secondaryValue, passingRecords, failingRecords: rows.length - passingRecords,
+      score: rows.length ? passingRecords / rows.length * 100 : 100, weight: Math.max(0, rule.weight ?? 1),
+      threshold: Math.min(100, Math.max(0, rule.threshold ?? 95)), severity: rule.severity ?? 'Medium',
     };
     return { rule, passes, result };
   });
-
   const grouped = new Map<string, typeof evaluations>();
-  evaluations.forEach((evaluation) => grouped.set(evaluation.rule.dimension, [...(grouped.get(evaluation.rule.dimension) ?? []), evaluation]));
+  evaluations.forEach((item) => grouped.set(item.rule.dimension, [...(grouped.get(item.rule.dimension) ?? []), item]));
   const dimensionResults: DimensionResult[] = [...grouped.entries()].map(([dimension, items]) => {
     const ruleWeight = items.reduce((sum, item) => sum + item.result.weight, 0);
-    const dimensionDefinition = dimensionMap.get(dimension.toLowerCase());
     const passingRecords = rows.filter((_, index) => items.every((item) => item.passes[index])).length;
     const passingChecks = items.reduce((sum, item) => sum + item.result.passingRecords, 0);
     const evaluatedChecks = rows.length * items.length;
     return {
-      dimension,
-      passingRecords,
-      failingRecords: rows.length - passingRecords,
+      dimension, passingRecords, failingRecords: rows.length - passingRecords,
       score: ruleWeight ? items.reduce((sum, item) => sum + item.result.score * item.result.weight, 0) / ruleWeight : 100,
-      activeRules: items.length,
-      weight: Math.max(0, dimensionDefinition?.weight ?? 1),
+      activeRules: items.length, weight: Math.max(0, dimensionMap.get(dimension.toLowerCase())?.weight ?? 1),
       threshold: items.reduce((minimum, item) => Math.min(minimum, item.result.threshold), 100),
-      passingChecks,
-      failingChecks: evaluatedChecks - passingChecks,
-      evaluatedChecks,
+      passingChecks, failingChecks: evaluatedChecks - passingChecks, evaluatedChecks,
     };
   });
-
   const dimensionWeight = dimensionResults.reduce((sum, dimension) => sum + (dimension.weight ?? 1), 0);
-  const overallScore = dimensionWeight
-    ? dimensionResults.reduce((sum, dimension) => sum + dimension.score * (dimension.weight ?? 1), 0) / dimensionWeight
-    : 0;
+  const overallScore = dimensionWeight ? dimensionResults.reduce((sum, dimension) => sum + dimension.score * (dimension.weight ?? 1), 0) / dimensionWeight : 0;
   const passingRecords = rows.filter((_, index) => evaluations.every((item) => item.passes[index])).length;
   return {
-    evaluatedRecords: rows.length,
-    passingRecords,
-    failingRecords: rows.length - passingRecords,
-    overallScore,
-    recordComplianceScore: rows.length ? (passingRecords / rows.length) * 100 : 100,
-    dimensions: dimensionResults,
-    rulesEvaluated: evaluations.length,
-    ruleResults: evaluations.map((item) => item.result),
-    scoringMethod: 'weighted-rule-average',
-    evaluationStatus: 'governed',
-    engineVersion: QUALITY_ENGINE_VERSION,
-    configurationFingerprint: fingerprint,
-    evaluationSnapshot: snapshot,
-    skippedRules,
+    evaluatedRecords: rows.length, passingRecords, failingRecords: rows.length - passingRecords, overallScore,
+    recordComplianceScore: rows.length ? passingRecords / rows.length * 100 : 100, dimensions: dimensionResults,
+    rulesEvaluated: evaluations.length, ruleResults: evaluations.map((item) => item.result), scoringMethod: 'weighted-rule-average',
+    evaluationStatus: 'governed', engineVersion: QUALITY_ENGINE_VERSION, configurationFingerprint: fingerprint,
+    evaluationSnapshot: snapshot, skippedRules,
   };
 }
 
 export function createQualityIssues(datasetId: string, runId: string, createdAt: string, quality: QualitySummary): Issue[] {
   if (quality.evaluationStatus === 'not-evaluated' || quality.rulesEvaluated === 0) return [];
   return (quality.ruleResults ?? []).filter((rule) => rule.score < rule.threshold).map((rule) => ({
-    id: crypto.randomUUID(),
-    datasetId,
-    runId,
-    category: 'Data quality',
-    severity: rule.severity as RuleSeverity,
-    status: 'Open',
+    id: crypto.randomUUID(), datasetId, runId, category: 'Data quality', severity: rule.severity as RuleSeverity, status: 'Open',
     title: `${rule.ruleName} fell below ${rule.threshold.toFixed(0)}%`,
     description: `${rule.failingRecords.toLocaleString()} of ${(rule.passingRecords + rule.failingRecords).toLocaleString()} evaluated records failed this ${rule.dimension.toLowerCase()} rule.`,
-    createdAt,
-    metric: rule.ruleName,
-    currentValue: `${rule.score.toFixed(1)}%`,
-    previousValue: `Threshold ${rule.threshold.toFixed(1)}%`,
+    createdAt, metric: rule.ruleName, currentValue: `${rule.score.toFixed(1)}%`, previousValue: `Threshold ${rule.threshold.toFixed(1)}%`,
   }));
 }
