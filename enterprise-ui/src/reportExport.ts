@@ -23,6 +23,9 @@ export function downloadDataQualityReport(dataset: Dataset, run: ProfileRun, iss
     { Metric: 'Profiled at', Value: run.createdAt },
     { Metric: 'Rows', Value: run.rowCount },
     { Metric: 'Columns', Value: run.columnCount },
+    { Metric: 'Memory usage MB', Value: run.memoryUsageMB === undefined ? '' : Number(run.memoryUsageMB.toFixed(3)) },
+    { Metric: 'Numeric columns', Value: run.numericColumnCount ?? '' },
+    { Metric: 'Other columns', Value: run.otherColumnCount ?? '' },
     { Metric: 'Duplicate rows', Value: run.duplicateRows },
     { Metric: 'Missing cells', Value: run.missingCells },
     { Metric: 'Missing cells %', Value: Number(run.missingPercentage.toFixed(2)) },
@@ -32,28 +35,62 @@ export function downloadDataQualityReport(dataset: Dataset, run: ProfileRun, iss
     { Metric: 'Open issues from this run', Value: issues.filter((issue) => issue.status === 'Open').length },
   ], [30, 42]);
 
-  appendSheet(workbook, 'Column Profile', run.columns.map((column) => ({
+  appendSheet(workbook, 'Basic Profile', run.columns.map((column) => ({
     Column: column.name,
     'Inferred type': column.inferredType,
-    'Non-null count': column.nonNullCount,
-    'Missing count': column.missingCount,
+    Count: column.nonNullCount,
+    Missing: column.missingCount,
     'Missing %': Number(column.missingPercentage.toFixed(2)),
-    'Distinct values': column.distinctCount,
-    'Unique values': column.uniqueCount,
+    Distinct: column.distinctCount,
+    Unique: column.uniqueCount,
     'Unique %': Number(column.uniquenessPercentage.toFixed(2)),
-    'Duplicate value count': column.duplicateValueCount,
-    'Outlier count': column.outlierCount,
-    'Likely key': column.likelyKey ? 'Yes' : 'No',
+    'Top value': column.topValues[0]?.value ?? '',
+    'Top frequency': column.topValues[0]?.count ?? 0,
+    Mean: column.numericStats?.mean === undefined ? '' : Number(column.numericStats.mean.toFixed(4)),
+    'Standard deviation': column.numericStats?.standardDeviation === undefined ? '' : Number(column.numericStats.standardDeviation.toFixed(4)),
+    Minimum: column.numericStats?.min ?? column.dateStats?.min ?? '',
+    Maximum: column.numericStats?.max ?? column.dateStats?.max ?? '',
+  })), [28, 15, 14, 14, 12, 14, 14, 12, 25, 16, 14, 20, 22, 22]);
+
+  appendSheet(workbook, 'Advanced Profile', run.columns.map((column) => ({
+    Column: column.name,
+    Classification: column.classification ?? '',
+    'Cardinality ratio': column.cardinalityRatio === undefined ? '' : Number(column.cardinalityRatio.toFixed(4)),
+    'Outlier count (IQR)': column.outlierCount,
+    Skewness: column.numericStats?.skewness === undefined ? '' : Number(column.numericStats.skewness.toFixed(4)),
+    Kurtosis: column.numericStats?.kurtosis === undefined ? '' : Number(column.numericStats.kurtosis.toFixed(4)),
     'Dominant pattern': column.dominantPattern ?? '',
     'Dominant pattern %': column.dominantPatternPercentage === undefined ? '' : Number(column.dominantPatternPercentage.toFixed(2)),
-    Minimum: column.numericStats?.min ?? '',
-    Maximum: column.numericStats?.max ?? '',
-    Mean: column.numericStats?.mean === undefined ? '' : Number(column.numericStats.mean.toFixed(4)),
-    Median: column.numericStats?.median === undefined ? '' : Number(column.numericStats.median.toFixed(4)),
-    'Standard deviation': column.numericStats?.standardDeviation === undefined ? '' : Number(column.numericStats.standardDeviation.toFixed(4)),
-    Q1: column.numericStats?.q1 === undefined ? '' : Number(column.numericStats.q1.toFixed(4)),
-    Q3: column.numericStats?.q3 === undefined ? '' : Number(column.numericStats.q3.toFixed(4)),
-  })), [28, 15, 15, 15, 12, 16, 14, 12, 20, 14, 12, 24, 20, 14, 14, 14, 14, 20, 14, 14]);
+    'Minimum text length': column.textStats?.minLength ?? '',
+    'Maximum text length': column.textStats?.maxLength ?? '',
+    'Average text length': column.textStats?.meanLength === undefined ? '' : Number(column.textStats.meanLength.toFixed(2)),
+    'Minimum date': column.dateStats?.min ?? '',
+    'Maximum date': column.dateStats?.max ?? '',
+    'Date range days': column.dateStats?.rangeDays === undefined ? '' : Number(column.dateStats.rangeDays.toFixed(2)),
+  })), [28, 18, 18, 20, 14, 14, 24, 20, 20, 20, 20, 22, 22, 18]);
+
+  appendSheet(workbook, 'Correlation', (run.correlations ?? []).map((item) => ({
+    'Column 1': item.left,
+    'Column 2': item.right,
+    'Pearson correlation': item.value,
+    Strength: Math.abs(item.value) >= .8 ? 'Strong' : Math.abs(item.value) >= .5 ? 'Moderate' : 'Weak',
+  })), [28, 28, 22, 14]);
+
+  appendSheet(workbook, 'Top Values', run.columns.flatMap((column) => column.topValues.map((value, index) => ({
+    Column: column.name,
+    Rank: index + 1,
+    Value: value.value,
+    Count: value.count,
+    'Percentage %': Number(value.percentage.toFixed(2)),
+  }))), [28, 10, 42, 14, 16]);
+
+  appendSheet(workbook, 'Patterns', run.columns.flatMap((column) => column.patterns.map((pattern, index) => ({
+    Column: column.name,
+    Rank: index + 1,
+    Pattern: pattern.pattern,
+    Count: pattern.count,
+    'Percentage %': Number(pattern.percentage.toFixed(2)),
+  }))), [28, 10, 42, 14, 16]);
 
   appendSheet(workbook, 'DQ Dimensions', run.quality.dimensions.map((dimension) => ({
     Dimension: dimension.dimension,
