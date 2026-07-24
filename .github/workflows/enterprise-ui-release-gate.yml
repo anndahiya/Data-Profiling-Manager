@@ -1,0 +1,42 @@
+name: Enterprise UI Release Gate
+
+on:
+  pull_request:
+    paths:
+      - "enterprise-ui/**"
+      - ".github/workflows/enterprise-ui-release-gate.yml"
+      - ".github/workflows/deploy-cloudflare.yml"
+  workflow_dispatch:
+
+jobs:
+  audit-test-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: enterprise-ui
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: npm
+          cache-dependency-path: enterprise-ui/package-lock.json
+      - name: Install frozen dependencies
+        run: npm ci --no-fund
+      - name: Audit high-severity dependency findings
+        run: npm audit --audit-level=high
+      - name: Run unit tests
+        run: npm test
+      - name: Compile production application
+        run: npm run build
+      - name: Verify production hardening
+        shell: bash
+        run: |
+          test -f dist/_headers
+          if find dist -type f -name '*.map' | grep -q .; then
+            echo "::error::Production source maps were generated."
+            exit 1
+          fi
