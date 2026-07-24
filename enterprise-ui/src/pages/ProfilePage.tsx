@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react';
 import { AlertTriangle, RefreshCw, Sparkles } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { enhanceProfileRun } from '../advancedProfiler';
+import { profileBrowserRows } from '../browserProfiler';
 import { PageHeader } from '../components';
 import { db } from '../db';
 import { parseBrowserFile } from '../fileParser';
-import { compareSchema, createIssues, profileRows } from '../profiler';
+import { compareSchema, createIssues } from '../profiler';
 import { createQualityIssues, evaluateConfiguredQuality } from '../quality';
 import { SourcePicker } from '../SourcePicker';
 import { pickLinkedDirectory, pickLinkedFile, resolveLinkedSource, supportsPersistentFileAccess } from '../sources';
@@ -116,7 +117,7 @@ export function ProfilePage({ workspace, reload }: { workspace: WorkspaceSnapsho
         storedHandle = { ...linkedHandle, datasetId: targetId };
       }
       const parsed = await parseBrowserFile(selectedFile);
-      const baseRun = enhanceProfileRun(parsed.rows, profileRows(parsed.rows, targetId, selectedFile.name, sourceKind));
+      const baseRun = enhanceProfileRun(parsed.rows, profileBrowserRows(parsed.rows, targetId, selectedFile.name, sourceKind));
       const configuredRules = workspace.rules.filter((rule) => rule.datasetId === targetId);
       const run: ProfileRun = {
         ...baseRun,
