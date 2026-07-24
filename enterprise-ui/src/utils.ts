@@ -48,7 +48,8 @@ export function workspaceQualityTrend(workspace: WorkspaceSnapshot): Array<{ dat
 }
 
 export function weightedDimensions(workspace: WorkspaceSnapshot): Array<{ dimension: string; score: number }> {
-  const latest = workspace.datasets.map((dataset) => latestRunFor(dataset.id, workspace.runs)).filter((run): run is ProfileRun => Boolean(run) && hasGovernedQuality(run.quality));
+  const latestRuns = workspace.datasets.map((dataset) => latestRunFor(dataset.id, workspace.runs)).filter(Boolean) as ProfileRun[];
+  const latest = latestRuns.filter((run) => hasGovernedQuality(run.quality));
   const names = [...new Set(latest.flatMap((run) => run.quality.dimensions.map((dimension) => dimension.dimension)))];
   return names.map((dimension) => {
     const results = latest
