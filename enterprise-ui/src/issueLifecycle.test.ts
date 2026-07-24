@@ -29,6 +29,15 @@ describe('issue lifecycle reconciliation', () => {
     expect(plan.resolutions[0].resolvedAt).toBe('2026-07-02T00:00:00.000Z');
   });
 
+  it('consolidates duplicate active issues created before recurrence tracking', () => {
+    const newest = issue({ id: 'newest', lastDetectedAt: '2026-07-02T00:00:00.000Z' });
+    const older = issue({ id: 'older', createdAt: '2026-06-01T00:00:00.000Z', lastDetectedAt: '2026-06-01T00:00:00.000Z' });
+    const generated = issue({ id: 'generated', runId: 'run-3' });
+    const plan = reconcileIssueSet([older, newest], [generated], 'run-3', '2026-07-03T00:00:00.000Z', ['Data quality']);
+    expect(plan.upserts[0].id).toBe('newest');
+    expect(plan.resolutions.map((item) => item.id)).toContain('older');
+  });
+
   it('does not resolve categories managed by another execution path', () => {
     const freshness = issue({ category: 'Freshness', issueKey: 'observability:freshness:source' });
     const plan = reconcileIssueSet([freshness], [], 'run-2', '2026-07-02T00:00:00.000Z', ['Data quality']);
