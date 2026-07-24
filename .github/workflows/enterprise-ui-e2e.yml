@@ -1,0 +1,49 @@
+name: Enterprise UI Browser Flows
+
+on:
+  pull_request:
+    paths:
+      - "enterprise-ui/**"
+      - ".github/workflows/enterprise-ui-e2e.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "enterprise-ui/**"
+      - ".github/workflows/enterprise-ui-e2e.yml"
+  workflow_dispatch:
+
+jobs:
+  chromium-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: enterprise-ui
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: npm
+          cache-dependency-path: enterprise-ui/package-lock.json
+      - name: Install frozen dependencies
+        run: npm ci --no-fund
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Build production application
+        run: npm run build
+      - name: Run browser flows
+        run: npm run test:e2e
+      - name: Upload Playwright diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: enterprise-ui-playwright-report
+          path: |
+            enterprise-ui/playwright-report/
+            enterprise-ui/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
