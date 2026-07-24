@@ -1,0 +1,40 @@
+name: Refresh P2 Enterprise UI Lockfile
+
+on:
+  push:
+    branches:
+      - release-hardening-p2-e2e
+    paths:
+      - "enterprise-ui/package.json"
+      - ".github/workflows/update-p2-lockfile.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh-lockfile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: release-hardening-p2-e2e
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Refresh frozen dependency tree
+        working-directory: enterprise-ui
+        run: npm install --package-lock-only --ignore-scripts --no-fund
+      - name: Commit lockfile when changed
+        shell: bash
+        run: |
+          if git diff --quiet -- enterprise-ui/package-lock.json; then
+            echo "Lockfile already matches package.json."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add enterprise-ui/package-lock.json
+          git commit -m "Refresh lockfile for Playwright end-to-end tests"
+          git push origin HEAD:release-hardening-p2-e2e
