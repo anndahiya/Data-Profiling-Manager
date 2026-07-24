@@ -1,13 +1,6 @@
+import { isNullLike, normalizeNullTokens } from './nullPolicy';
 import type { ColumnProfile, DataType, NumericStats, PatternValue, ProfileRun, TopValue } from './types';
 import type { DataRow } from './profiler';
-
-const DEFAULT_NULL_TOKENS = new Set(['', 'null', 'n/a', 'nan', '(blank)']);
-
-function isNullLike(value: unknown): boolean {
-  if (value === null || value === undefined) return true;
-  if (typeof value === 'number' && Number.isNaN(value)) return true;
-  return typeof value === 'string' && DEFAULT_NULL_TOKENS.has(value.trim().toLowerCase());
-}
 
 function normalizeHeaders(headers: unknown[]): string[] {
   const counts = new Map<string, number>();
@@ -26,8 +19,8 @@ function isDateShaped(text: string): boolean {
   return (numericDate.test(text) || isoTimestamp.test(text) || namedMonth.test(text)) && !Number.isNaN(Date.parse(text));
 }
 
-function inferValueType(value: unknown): DataType {
-  if (isNullLike(value)) return 'empty';
+function inferValueType(value: unknown, nullTokens: readonly string[]): DataType {
+  if (isNullLike(value, nullTokens)) return 'empty';
   if (typeof value === 'boolean') return 'boolean';
   if (typeof value === 'number') return Number.isInteger(value) ? 'integer' : 'decimal';
   if (value instanceof Date && !Number.isNaN(value.getTime())) return 'date';
@@ -39,9 +32,9 @@ function inferValueType(value: unknown): DataType {
   return 'text';
 }
 
-function inferColumnType(values: unknown[]): DataType {
+function inferColumnType(values: unknown[], nullTokens: readonly string[]): DataType {
   const counts: Record<DataType, number> = { integer: 0, decimal: 0, date: 0, boolean: 0, text: 0, empty: 0 };
-  values.forEach((value) => counts[inferValueType(value)] += 1);
+  values.forEach((value) => counts[inferValueType(value, nullTokens)] += 1);
   const observed = (Object.entries(counts) as Array<[DataType, number]>).filter(([type]) => type !== 'empty');
   if (!observed.length) return 'empty';
   observed.sort((a, b) => b[1] - a[1]);
@@ -50,8 +43,8 @@ function inferColumnType(values: unknown[]): DataType {
   return winner;
 }
 
-function valueKey(value: unknown): string {
-  if (isNullLike(value)) return '(null)';
+function valueKey(value: unknown, nullTokens: readonly string[]): string {
+  if (isNullLike(value, nullTokens)) return '(null)';
   if (value instanceof Date) return value.toISOString();
   if (typeof value === 'object') return JSON.stringify(value);
   return String(value);
@@ -70,14 +63,11 @@ function numericStats(values: number[]): NumericStats | undefined {
   if (!finite.length) return undefined;
   const mean = finite.reduce((sum, value) => sum + value, 0) / finite.length;
   const variance = finite.reduce((sum, value) => sum + (value - mean) ** 2, 0) / finite.length;
-  return {
-    min: finite[0], max: finite[finite.length - 1], mean, median: quantile(finite, .5),
-    standardDeviation: Math.sqrt(variance), q1: quantile(finite, .25), q3: quantile(finite, .75),
-  };
+  return { min: finite[0], max: finite[finite.length - 1], mean, median: quantile(finite, .5), standardDeviation: Math.sqrt(variance), q1: quantile(finite, .25), q3: quantile(finite, .75) };
 }
 
-function patternFor(value: unknown): string {
-  if (isNullLike(value)) return '(null)';
+function patternFor(value: unknown, nullTokens: readonly string[]): string {
+  if (isNullLike(value, nullTokens)) return '(null)';
   return String(value).trim().replace(/[A-Z]/g, 'A').replace(/[a-z]/g, 'a').replace(/\d/g, '9').replace(/\s+/g, ' ');
 }
 
@@ -89,16 +79,16 @@ function patternEntries(map: Map<string, number>, total: number, limit = 8): Pat
   return [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([pattern, count]) => ({ pattern, count, percentage: total ? count / total * 100 : 0 }));
 }
 
-function profileColumn(name: string, rows: DataRow[]): ColumnProfile {
+function profileColumn(name: string, rows: DataRow[], nullTokens: readonly string[]): ColumnProfile {
   const values = rows.map((row) => row[name]);
-  const inferredType = inferColumnType(values);
-  const nonNull = values.filter((value) => !isNullLike(value));
+  const inferredType = inferColumnType(values, nullTokens);
+  const nonNull = values.filter((value) => !isNullLike(value, nullTokens));
   const frequencies = new Map<string, number>();
   const patterns = new Map<string, number>();
   nonNull.forEach((value) => {
-    const key = valueKey(value);
+    const key = valueKey(value, nullTokens);
     frequencies.set(key, (frequencies.get(key) ?? 0) + 1);
-    const pattern = patternFor(value);
+    const pattern = patternFor(value, nullTokens);
     patterns.set(pattern, (patterns.get(pattern) ?? 0) + 1);
   });
   const uniqueCount = [...frequencies.values()].filter((count) => count === 1).length;
@@ -130,35 +120,37 @@ function profileColumn(name: string, rows: DataRow[]): ColumnProfile {
   };
 }
 
-function duplicateRows(rows: DataRow[], headers: string[]): number {
+function duplicateRows(rows: DataRow[], headers: string[], nullTokens: readonly string[]): number {
   const seen = new Set<string>();
   let duplicates = 0;
   rows.forEach((row) => {
-    const key = JSON.stringify(headers.map((header) => valueKey(row[header])));
+    const key = JSON.stringify(headers.map((header) => valueKey(row[header], nullTokens)));
     if (seen.has(key)) duplicates += 1;
     else seen.add(key);
   });
   return duplicates;
 }
 
-export function profileBrowserRows(rows: DataRow[], datasetId: string, fileName: string, sourceKind: ProfileRun['sourceKind']): ProfileRun {
+export function profileBrowserRows(rows: DataRow[], datasetId: string, fileName: string, sourceKind: ProfileRun['sourceKind'], configuredNullTokens?: readonly string[]): ProfileRun {
   if (!rows.length) throw new Error('The file does not contain any data rows.');
+  const nullTokens = normalizeNullTokens(configuredNullTokens);
   const headers = normalizeHeaders(Object.keys(rows[0]));
   const normalizedRows = rows.map((row) => {
     const output: DataRow = {};
     headers.forEach((header) => { output[header] = row[header]; });
     return output;
   });
-  const columns = headers.map((header) => profileColumn(header, normalizedRows));
+  const columns = headers.map((header) => profileColumn(header, normalizedRows, nullTokens));
   const missingCells = columns.reduce((sum, column) => sum + column.missingCount, 0);
   return {
     id: crypto.randomUUID(), datasetId, fileName, createdAt: new Date().toISOString(),
     rowCount: normalizedRows.length, columnCount: columns.length,
-    duplicateRows: duplicateRows(normalizedRows, headers), missingCells,
+    duplicateRows: duplicateRows(normalizedRows, headers, nullTokens), missingCells,
     missingPercentage: normalizedRows.length && columns.length ? missingCells / (normalizedRows.length * columns.length) * 100 : 0,
     schemaFingerprint: columns.map((column) => `${column.name}:${column.inferredType}`).sort().join('|'),
     columns,
     quality: { evaluatedRecords: normalizedRows.length, passingRecords: 0, failingRecords: 0, overallScore: 0, dimensions: [], rulesEvaluated: 0, evaluationStatus: 'not-evaluated' },
     sourceKind,
+    nullTokens,
   };
 }
