@@ -8,10 +8,12 @@ import type {
   QualitySummary,
   RuleResult,
   RuleSeverity,
+  SkippedQualityRule,
 } from './types';
 import type { DataRow } from './profiler';
 
 const BASE_DATE = '2026-01-01T00:00:00.000Z';
+const QUALITY_ENGINE_VERSION = 'web-dq-2.0';
 const NULL_LIKE = new Set(['', 'null', 'none', 'n/a', 'na', 'nan', 'unknown', '(blank)']);
 
 export const DIMENSION_LIBRARY: QualityDimension[] = [
@@ -127,6 +129,19 @@ function activeDimensionMap(dimensions?: QualityDimension[]): Map<string, Qualit
   return new Map(catalog.filter((dimension) => dimension.enabled).map((dimension) => [dimension.name.toLowerCase(), dimension]));
 }
 
+function configurationFingerprint(rules: QualityRule[], dimensions: QualityDimension[]): string {
+  const value = JSON.stringify({
+    rules: [...rules].sort((a, b) => a.id.localeCompare(b.id)).map(({ id, datasetId, name, dimension, columnName, ruleType, expectedValue, secondaryValue, enabled, weight, threshold, severity }) => ({ id, datasetId, name, dimension, columnName, ruleType, expectedValue, secondaryValue, enabled, weight, threshold, severity })),
+    dimensions: [...dimensions].sort((a, b) => a.id.localeCompare(b.id)).map(({ id, name, description, weight, enabled, source }) => ({ id, name, description, weight, enabled, source })),
+  });
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `fnv1a-${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
+
 export function buildSuggestedRules(datasetId: string, columns: ColumnProfile[]): QualityRule[] {
   const createdAt = new Date().toISOString();
   const rules: QualityRule[] = [];
@@ -158,8 +173,52 @@ export function evaluateConfiguredQuality(
 ): QualitySummary {
   const dimensionMap = activeDimensionMap(dimensions);
   const availableColumns = new Set(columns.map((column) => column.name));
-  const rules = (configuredRules.length ? configuredRules : buildSuggestedRules('baseline', columns))
-    .filter((rule) => rule.enabled && availableColumns.has(rule.columnName) && dimensionMap.has(rule.dimension.toLowerCase()));
+  const skippedRules: SkippedQualityRule[] = [];
+  const rules = configuredRules.filter((rule) => {
+    if (!rule.enabled) return false;
+    if (!availableColumns.has(rule.columnName)) {
+      skippedRules.push({ ruleId: rule.id, ruleName: rule.name, reason: `Column “${rule.columnName}” was not present in this run.` });
+      return false;
+    }
+    if (!dimensionMap.has(rule.dimension.toLowerCase())) {
+      skippedRules.push({ ruleId: rule.id, ruleName: rule.name, reason: `Dimension “${rule.dimension}” was disabled or unavailable.` });
+      return false;
+    }
+    return true;
+  });
+  const contributingDimensions = [...new Set(rules.map((rule) => rule.dimension.toLowerCase()))]
+    .map((name) => dimensionMap.get(name))
+    .filter((dimension): dimension is QualityDimension => Boolean(dimension))
+    .map((dimension) => ({ ...dimension }));
+  const evaluatedAt = new Date().toISOString();
+  const fingerprint = configurationFingerprint(rules, contributingDimensions);
+  const snapshot = {
+    version: 1 as const,
+    engineVersion: QUALITY_ENGINE_VERSION,
+    configurationFingerprint: fingerprint,
+    evaluatedAt,
+    rules: rules.map((rule) => ({ ...rule })),
+    dimensions: contributingDimensions,
+  };
+
+  if (!rules.length) {
+    return {
+      evaluatedRecords: rows.length,
+      passingRecords: 0,
+      failingRecords: 0,
+      overallScore: 0,
+      recordComplianceScore: 0,
+      dimensions: [],
+      rulesEvaluated: 0,
+      ruleResults: [],
+      scoringMethod: 'weighted-rule-average',
+      evaluationStatus: 'not-evaluated',
+      engineVersion: QUALITY_ENGINE_VERSION,
+      configurationFingerprint: fingerprint,
+      evaluationSnapshot: snapshot,
+      skippedRules,
+    };
+  }
 
   const evaluations = rules.map((rule) => {
     const passes = evaluateRule(rows, rule);
@@ -169,6 +228,10 @@ export function evaluateConfiguredQuality(
       ruleId: rule.id,
       ruleName: rule.name,
       dimension: rule.dimension,
+      columnName: rule.columnName,
+      ruleType: rule.ruleType,
+      expectedValue: rule.expectedValue,
+      secondaryValue: rule.secondaryValue,
       passingRecords,
       failingRecords,
       score: rows.length ? (passingRecords / rows.length) * 100 : 100,
@@ -204,7 +267,7 @@ export function evaluateConfiguredQuality(
   const dimensionWeight = dimensionResults.reduce((sum, dimension) => sum + (dimension.weight ?? 1), 0);
   const overallScore = dimensionWeight
     ? dimensionResults.reduce((sum, dimension) => sum + dimension.score * (dimension.weight ?? 1), 0) / dimensionWeight
-    : 100;
+    : 0;
   const passingRecords = rows.filter((_, index) => evaluations.every((item) => item.passes[index])).length;
   return {
     evaluatedRecords: rows.length,
@@ -216,10 +279,16 @@ export function evaluateConfiguredQuality(
     rulesEvaluated: evaluations.length,
     ruleResults: evaluations.map((item) => item.result),
     scoringMethod: 'weighted-rule-average',
+    evaluationStatus: 'governed',
+    engineVersion: QUALITY_ENGINE_VERSION,
+    configurationFingerprint: fingerprint,
+    evaluationSnapshot: snapshot,
+    skippedRules,
   };
 }
 
 export function createQualityIssues(datasetId: string, runId: string, createdAt: string, quality: QualitySummary): Issue[] {
+  if (quality.evaluationStatus === 'not-evaluated' || quality.rulesEvaluated === 0) return [];
   return (quality.ruleResults ?? []).filter((rule) => rule.score < rule.threshold).map((rule) => ({
     id: crypto.randomUUID(),
     datasetId,
