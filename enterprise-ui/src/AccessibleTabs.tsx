@@ -1,4 +1,4 @@
-import type { KeyboardEvent } from 'react';
+import type { KeyboardEvent, ReactNode } from 'react';
 
 export function AccessibleTabs({ items, value, onChange, label, idPrefix }: {
   items: string[];
@@ -39,7 +39,7 @@ export function AccessibleTabs({ items, value, onChange, label, idPrefix }: {
   </div>;
 }
 
-export function TabPanel({ tab, active, idPrefix, children }: { tab: string; active: string; idPrefix: string; children: React.ReactNode }) {
+export function TabPanel({ tab, active, idPrefix, children }: { tab: string; active: string; idPrefix: string; children: ReactNode }) {
   if (tab !== active) return null;
   const slug = tab.toLowerCase().replace(/[^a-z0-9]+/g, '-');
   return <div role="tabpanel" id={`${idPrefix}-panel-${slug}`} aria-labelledby={`${idPrefix}-tab-${slug}`} tabIndex={0}>{children}</div>;
