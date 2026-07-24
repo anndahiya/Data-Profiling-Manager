@@ -33,7 +33,7 @@ export function ScoreBadge({ score, available = true }: { score: number; availab
 export function DimensionBars({ dimensions }: { dimensions: DimensionResult[] }) {
   return <div className="dimension-list">{dimensions.map((dimension) => <div className="dimension-row" key={dimension.dimension}>
     <div><strong>{dimension.dimension}</strong><span>{dimension.activeRules} active rule{dimension.activeRules === 1 ? '' : 's'}</span></div>
-    <div className="progress-track"><div className="progress-fill" style={{ width: `${Math.max(2, dimension.score)}%` }} /></div>
+    <div className="progress-track" role="progressbar" aria-label={`${dimension.dimension} score`} aria-valuenow={dimension.score} aria-valuemin={0} aria-valuemax={100}><div className="progress-fill" style={{ width: `${Math.max(2, dimension.score)}%` }} /></div>
     <b>{dimension.score.toFixed(1)}%</b>
   </div>)}</div>;
 }
@@ -58,8 +58,8 @@ const severityClass: Record<Issue['severity'], string> = { Critical: 'critical',
 
 export function IssueTable({ issues, onStatus }: { issues: Issue[]; onStatus?: (issue: Issue, status: IssueStatus) => void }) {
   if (!issues.length) return <div className="mini-empty large"><Check size={24} /><span>No issues in this view</span></div>;
-  return <div className="table-wrap"><table><thead><tr><th>Severity</th><th>Issue</th><th>Category</th><th>Status</th><th>Detected</th><th /></tr></thead><tbody>
-    {issues.map((issue) => <tr key={issue.id}><td><span className={`severity-dot ${severityClass[issue.severity]}`} />{issue.severity}</td><td><strong>{issue.title}</strong><span className="cell-subtitle">{issue.description}</span></td><td><span className="category-chip">{issue.category}</span></td><td><span className={`status-chip ${issue.status.toLowerCase()}`}>{issue.status}</span></td><td>{formatDate(issue.createdAt)}</td><td>{onStatus && <select className="inline-select" value={issue.status} onChange={(event) => onStatus(issue, event.target.value as IssueStatus)}><option>Open</option><option>Acknowledged</option><option>Resolved</option><option>Closed</option></select>}</td></tr>)}
+  return <div className="table-wrap"><table><thead><tr><th>Severity</th><th>Issue</th><th>Category</th><th>Status</th><th>Occurrences</th><th>Latest detection</th><th /></tr></thead><tbody>
+    {issues.map((issue) => <tr key={issue.id}><td><span className={`severity-dot ${severityClass[issue.severity]}`} />{issue.severity}</td><td><strong>{issue.title}</strong><span className="cell-subtitle">{issue.description}{issue.firstDetectedAt && ` · First detected ${formatDate(issue.firstDetectedAt)}`}</span></td><td><span className="category-chip">{issue.category}</span></td><td><span className={`status-chip ${issue.status.toLowerCase()}`}>{issue.status}</span></td><td>{Math.max(1, issue.occurrenceCount ?? 1).toLocaleString()}</td><td>{formatDate(issue.lastDetectedAt ?? issue.createdAt)}</td><td>{onStatus && <select aria-label={`Change status for ${issue.title}`} className="inline-select" value={issue.status} onChange={(event) => onStatus(issue, event.target.value as IssueStatus)}><option>Open</option><option>Acknowledged</option><option>Resolved</option><option>Closed</option></select>}</td></tr>)}
   </tbody></table></div>;
 }
 
