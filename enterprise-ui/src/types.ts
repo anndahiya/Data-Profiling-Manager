@@ -8,6 +8,7 @@ export type RuleSeverity = 'Critical' | 'High' | 'Medium' | 'Low' | 'Info';
 export type RuleType = 'not-null' | 'unique' | 'type' | 'pattern' | 'freshness' | 'range' | 'allowed-values' | 'min-length' | 'max-length';
 export type ScheduleCadence = 'Weekly' | 'Monthly' | 'Quarterly' | 'Yearly';
 export type DeliveryMode = 'every-run' | 'breach-only';
+export type ColumnClassification = 'Empty' | 'Constant' | 'Likely key' | 'Measure' | 'Date/time' | 'Boolean' | 'Categorical/other';
 
 export interface DatasetSource {
   mode: SourceMode;
@@ -49,11 +50,26 @@ export interface LinkedSourceHandle {
 
 export interface TopValue { value: string; count: number; percentage: number; }
 export interface PatternValue { pattern: string; count: number; percentage: number; }
-export interface NumericStats { min: number; max: number; mean: number; median: number; standardDeviation: number; q1: number; q3: number; }
+export interface NumericStats {
+  min: number;
+  max: number;
+  mean: number;
+  median: number;
+  standardDeviation: number;
+  q1: number;
+  q3: number;
+  skewness?: number;
+  kurtosis?: number;
+}
+export interface TextStats { minLength: number; maxLength: number; meanLength: number; }
+export interface DateStats { min?: string; max?: string; rangeDays?: number; }
+export interface CorrelationValue { left: string; right: string; value: number; }
+export interface ColumnRename { original: string; profiledAs: string; }
 
 export interface ColumnProfile {
   name: string;
   inferredType: DataType;
+  nativeType?: string;
   nonNullCount: number;
   missingCount: number;
   missingPercentage: number;
@@ -61,13 +77,17 @@ export interface ColumnProfile {
   uniqueCount: number;
   duplicateValueCount: number;
   uniquenessPercentage: number;
+  cardinalityRatio?: number;
   outlierCount: number;
   likelyKey: boolean;
+  classification?: ColumnClassification;
   dominantPattern?: string;
   dominantPatternPercentage?: number;
   topValues: TopValue[];
   patterns: PatternValue[];
   numericStats?: NumericStats;
+  textStats?: TextStats;
+  dateStats?: DateStats;
 }
 
 export interface RuleResult {
@@ -167,10 +187,15 @@ export interface ProfileRun {
   duplicateRows: number;
   missingCells: number;
   missingPercentage: number;
+  memoryUsageMB?: number;
+  numericColumnCount?: number;
+  otherColumnCount?: number;
   schemaFingerprint: string;
   columns: ColumnProfile[];
+  correlations?: CorrelationValue[];
+  columnRenames?: ColumnRename[];
   quality: QualitySummary;
-  sourceKind: 'CSV' | 'Excel' | 'Demo' | 'Linked file' | 'Linked folder' | 'Database';
+  sourceKind: 'CSV' | 'Excel' | 'Parquet' | 'Demo' | 'Linked file' | 'Linked folder' | 'Database';
   sourceReference?: string;
 }
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { BellRing, BookOpenCheck, CalendarClock, CircleGauge, Columns3, Database, FileBarChart, History, Menu, Search, Settings, ShieldCheck, TriangleAlert, UploadCloud, X } from 'lucide-react';
+import { BellRing, BookOpenCheck, CalendarClock, CircleGauge, Columns3, Database, FileBarChart, History, Menu, Search, Settings, ShieldCheck, TrendingUp, TriangleAlert, UploadCloud, X } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import type { WorkspaceSnapshot } from './types';
 import { formatDate } from './utils';
@@ -15,6 +15,7 @@ const navGroups = [
     { path: '/issues', label: 'Issues', icon: BellRing },
     { path: '/monitoring', label: 'Monitoring & schedules', icon: CalendarClock },
     { path: '/compare', label: 'Compare runs', icon: Columns3 },
+    { path: '/trends', label: 'Profiling trends', icon: TrendingUp },
     { path: '/history', label: 'Run history', icon: History },
     { path: '/rules', label: 'Rules & dimensions', icon: BookOpenCheck },
   ] },
