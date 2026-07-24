@@ -40,10 +40,10 @@ export function SourcePicker({
     </select></label>
 
     {sourceMode === 'manual-upload' && <label className={`dropzone ${file ? 'has-file' : ''}`}>
-      <input type="file" accept=".csv,.txt,.xlsx,.xls" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
+      <input type="file" accept=".csv,.txt,.xlsx" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
       <UploadCloud size={28} />
       <strong>{file ? file.name : 'Drop a CSV or Excel file here'}</strong>
-      <span>{file ? `${(file.size / 1024 / 1024).toFixed(2)} MB · ready to profile` : 'Supports CSV, .xlsx, and legacy .xls. The browser cannot reveal or remember a one-time upload path.'}</span>
+      <span>{file ? `${(file.size / 1024 / 1024).toFixed(2)} MB · ready to profile` : 'Supports CSV, TXT, and .xlsx up to 50 MB. Use the local edition for .xls, Parquet, or larger files.'}</span>
     </label>}
 
     {sourceMode === 'linked-file' && <div className="linked-source-card">
