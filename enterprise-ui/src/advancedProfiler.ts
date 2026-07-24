@@ -70,6 +70,7 @@ export function enrichColumnProfiles(rows: DataRow[], columns: ColumnProfile[]):
     const shape = numeric ? distributionShape(finiteNumbers(rows, column.name)) : {};
     return {
       ...column,
+      topValues: [],
       nativeType: column.inferredType,
       cardinalityRatio,
       classification: classification(column),
