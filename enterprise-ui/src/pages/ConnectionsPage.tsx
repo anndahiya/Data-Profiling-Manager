@@ -25,8 +25,19 @@ export function ConnectionsPage({ workspace, reload }: { workspace: WorkspaceSna
   };
   const toggle = async (connection: DatabaseConnection) => { await db.connections.update(connection.id, { enabled: !connection.enabled, updatedAt: new Date().toISOString() }); await reload(); };
   const remove = async (connection: DatabaseConnection) => {
-    if (!window.confirm(`Delete the metadata for “${connection.name}”? No database credentials are stored here.`)) return;
-    await db.connections.delete(connection.id); await reload();
+    const reference = `connection:${connection.id}`;
+    const linkedMonitors = (workspace.monitors ?? []).filter((monitor) => monitor.sourcePath === reference);
+    const message = linkedMonitors.length
+      ? `Delete the metadata for “${connection.name}” and remove ${linkedMonitors.length} monitor${linkedMonitors.length === 1 ? '' : 's'} that depend on it? No database credentials are stored here.`
+      : `Delete the metadata for “${connection.name}”? No database credentials are stored here.`;
+    if (!window.confirm(message)) return;
+    await db.transaction('rw', [db.connections, db.datasets, db.monitors], async () => {
+      await db.connections.delete(connection.id);
+      const dataset = workspace.datasets.find((item) => item.id === connection.datasetId);
+      if (dataset?.source?.connectionId === connection.id) await db.datasets.update(dataset.id, { source: { mode: 'manual-upload' }, updatedAt: new Date().toISOString() });
+      await Promise.all(linkedMonitors.map((monitor) => db.monitors.delete(monitor.id)));
+    });
+    await reload();
   };
   const active = connections.filter((connection) => connection.enabled);
   return <>

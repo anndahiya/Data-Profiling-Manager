@@ -31,6 +31,9 @@ class ScheduledQualityEngineTests(unittest.TestCase):
         self.assertEqual(quality["overall_score"], 50)
         self.assertEqual(quality["record_compliance_score"], 0)
         self.assertEqual(quality["rules_evaluated"], 2)
+        self.assertEqual(quality["evaluation_status"], "governed")
+        self.assertTrue(str(quality["configuration_fingerprint"]).startswith("sha256-"))
+        self.assertEqual(quality["rule_results"][0]["column_name"], "email")
 
     def test_custom_dimension_and_range_rule_are_supported(self) -> None:
         frame = pd.DataFrame([{"amount": 10}, {"amount": 200}])
@@ -44,6 +47,18 @@ class ScheduledQualityEngineTests(unittest.TestCase):
         self.assertIsNotNone(quality)
         assert quality is not None
         self.assertEqual(quality["overall_score"], 50)
+        self.assertEqual(quality["rule_results"][0]["failing_records"], 1)
+
+    def test_business_tokens_are_not_silently_treated_as_missing(self) -> None:
+        frame = pd.DataFrame([{"status": "unknown"}, {"status": "NA"}, {"status": "none"}, {"status": ""}])
+        config = {
+            "dimensions": [{"name": "Completeness", "enabled": True, "weight": 1}],
+            "rules": [{"id": "required", "datasetId": "customer", "name": "Status required", "dimension": "Completeness", "columnName": "status", "ruleType": "not-null", "enabled": True, "weight": 1, "threshold": 95}],
+        }
+        quality = evaluate_quality(frame, "customer", config)
+        self.assertIsNotNone(quality)
+        assert quality is not None
+        self.assertEqual(quality["rule_results"][0]["passing_records"], 3)
         self.assertEqual(quality["rule_results"][0]["failing_records"], 1)
 
     def test_returns_none_when_dataset_has_no_governed_rules(self) -> None:

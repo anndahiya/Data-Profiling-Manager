@@ -9,6 +9,7 @@ export type RuleType = 'not-null' | 'unique' | 'type' | 'pattern' | 'freshness' 
 export type ScheduleCadence = 'Weekly' | 'Monthly' | 'Quarterly' | 'Yearly';
 export type DeliveryMode = 'every-run' | 'breach-only';
 export type ColumnClassification = 'Empty' | 'Constant' | 'Likely key' | 'Measure' | 'Date/time' | 'Boolean' | 'Categorical/other';
+export type QualityEvaluationStatus = 'governed' | 'not-evaluated' | 'legacy';
 
 export interface DatasetSource {
   mode: SourceMode;
@@ -90,10 +91,44 @@ export interface ColumnProfile {
   dateStats?: DateStats;
 }
 
+export interface QualityRule {
+  id: string;
+  datasetId: string;
+  name: string;
+  dimension: Dimension;
+  columnName: string;
+  ruleType: RuleType;
+  expectedValue?: string;
+  secondaryValue?: string;
+  enabled: boolean;
+  source: 'Suggested' | 'User';
+  weight?: number;
+  threshold?: number;
+  severity?: RuleSeverity;
+  notes?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface QualityDimension {
+  id: string;
+  name: string;
+  description: string;
+  weight: number;
+  enabled: boolean;
+  source: 'Standard' | 'Library' | 'User';
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface RuleResult {
   ruleId: string;
   ruleName: string;
   dimension: Dimension;
+  columnName?: string;
+  ruleType?: RuleType;
+  expectedValue?: string;
+  secondaryValue?: string;
   passingRecords: number;
   failingRecords: number;
   score: number;
@@ -115,6 +150,21 @@ export interface DimensionResult {
   evaluatedChecks?: number;
 }
 
+export interface QualityEvaluationSnapshot {
+  version: 1;
+  engineVersion: string;
+  configurationFingerprint: string;
+  evaluatedAt: string;
+  rules: QualityRule[];
+  dimensions: QualityDimension[];
+}
+
+export interface SkippedQualityRule {
+  ruleId: string;
+  ruleName: string;
+  reason: string;
+}
+
 export interface QualitySummary {
   evaluatedRecords: number;
   passingRecords: number;
@@ -125,17 +175,11 @@ export interface QualitySummary {
   recordComplianceScore?: number;
   ruleResults?: RuleResult[];
   scoringMethod?: 'weighted-rule-average' | 'record-pass-all';
-}
-
-export interface QualityDimension {
-  id: string;
-  name: string;
-  description: string;
-  weight: number;
-  enabled: boolean;
-  source: 'Standard' | 'Library' | 'User';
-  createdAt: string;
-  updatedAt: string;
+  evaluationStatus?: QualityEvaluationStatus;
+  engineVersion?: string;
+  configurationFingerprint?: string;
+  evaluationSnapshot?: QualityEvaluationSnapshot;
+  skippedRules?: SkippedQualityRule[];
 }
 
 export interface MonitorPolicy {
@@ -204,25 +248,6 @@ export interface SchemaDiff {
   removed: string[];
   changed: Array<{ name: string; before: DataType; after: DataType }>;
   hasChanges: boolean;
-}
-
-export interface QualityRule {
-  id: string;
-  datasetId: string;
-  name: string;
-  dimension: Dimension;
-  columnName: string;
-  ruleType: RuleType;
-  expectedValue?: string;
-  secondaryValue?: string;
-  enabled: boolean;
-  source: 'Suggested' | 'User';
-  weight?: number;
-  threshold?: number;
-  severity?: RuleSeverity;
-  notes?: string;
-  createdAt: string;
-  updatedAt?: string;
 }
 
 export interface Issue {

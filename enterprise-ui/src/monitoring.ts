@@ -1,7 +1,12 @@
-import { recordComplianceScore } from './scoring';
+import { hasGovernedQuality, recordComplianceScore } from './scoring';
 import type { Dataset, MonitorPolicy, ProfileRun, WorkspaceSnapshot } from './types';
 
 const WEEKDAYS: Record<string, number> = { Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6 };
+
+function quarterlyMonths(startMonth: number): string {
+  const start = Math.min(12, Math.max(1, startMonth));
+  return Array.from({ length: 4 }, (_, index) => ((start - 1 + index * 3) % 12) + 1).sort((a, b) => a - b).join(',');
+}
 
 export function cadenceToCron(policy: MonitorPolicy): string {
   const minute = Math.min(59, Math.max(0, policy.minute));
@@ -9,7 +14,7 @@ export function cadenceToCron(policy: MonitorPolicy): string {
   const day = Math.min(28, Math.max(1, policy.dayOfMonth));
   const month = Math.min(12, Math.max(1, policy.month));
   if (policy.cadence === 'Weekly') return `${minute} ${hour} * * ${WEEKDAYS[policy.weekday] ?? 1}`;
-  if (policy.cadence === 'Quarterly') return `${minute} ${hour} ${day} 1,4,7,10 *`;
+  if (policy.cadence === 'Quarterly') return `${minute} ${hour} ${day} ${quarterlyMonths(month)} *`;
   if (policy.cadence === 'Yearly') return `${minute} ${hour} ${day} ${month} *`;
   return `${minute} ${hour} ${day} * *`;
 }
@@ -100,9 +105,14 @@ jobs:
 export function monitorBreaches(policy: MonitorPolicy, latest?: ProfileRun, previous?: ProfileRun): string[] {
   if (!latest) return ['No profiling run exists yet.'];
   const breaches: string[] = [];
-  if (policy.minimumOverallQuality !== undefined && latest.quality.overallScore < policy.minimumOverallQuality) breaches.push(`Overall quality ${latest.quality.overallScore.toFixed(1)}% is below ${policy.minimumOverallQuality.toFixed(1)}%.`);
-  const compliance = recordComplianceScore(latest.quality);
-  if (policy.minimumRecordCompliance !== undefined && compliance < policy.minimumRecordCompliance) breaches.push(`Strict record compliance ${compliance.toFixed(1)}% is below ${policy.minimumRecordCompliance.toFixed(1)}%.`);
+  const governed = hasGovernedQuality(latest.quality);
+  if ((policy.minimumOverallQuality !== undefined || policy.minimumRecordCompliance !== undefined) && !governed) {
+    breaches.push('Governed DQ thresholds could not be evaluated because the latest run had no applicable active rules.');
+  } else {
+    if (policy.minimumOverallQuality !== undefined && latest.quality.overallScore < policy.minimumOverallQuality) breaches.push(`Overall quality ${latest.quality.overallScore.toFixed(1)}% is below ${policy.minimumOverallQuality.toFixed(1)}%.`);
+    const compliance = recordComplianceScore(latest.quality);
+    if (policy.minimumRecordCompliance !== undefined && compliance < policy.minimumRecordCompliance) breaches.push(`Records passing all active rules ${compliance.toFixed(1)}% is below ${policy.minimumRecordCompliance.toFixed(1)}%.`);
+  }
   if (policy.maximumMissingPercent !== undefined && latest.missingPercentage > policy.maximumMissingPercent) breaches.push(`Missing cells ${latest.missingPercentage.toFixed(1)}% exceed ${policy.maximumMissingPercent.toFixed(1)}%.`);
   if (policy.maximumDuplicateRows !== undefined && latest.duplicateRows > policy.maximumDuplicateRows) breaches.push(`${latest.duplicateRows.toLocaleString()} duplicate rows exceed ${policy.maximumDuplicateRows.toLocaleString()}.`);
   if (policy.maximumRowChangePercent !== undefined && previous?.rowCount) {

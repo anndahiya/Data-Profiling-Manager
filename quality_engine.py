@@ -1,6 +1,7 @@
 """Evaluate exported governed data-quality rules for scheduled profiling."""
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -9,7 +10,8 @@ from typing import Any
 
 import pandas as pd
 
-NULL_LIKE = {"", "null", "none", "n/a", "na", "nan", "unknown", "(blank)"}
+ENGINE_VERSION = "python-dq-2.0"
+NULL_LIKE = {"", "null", "n/a", "nan", "(blank)"}
 
 
 def _is_null_like(value: Any) -> bool:
@@ -116,8 +118,7 @@ def _evaluate_rule(frame: pd.DataFrame, rule: dict[str, Any]) -> pd.Series:
             timestamp = pd.to_datetime(value, errors="coerce", utc=True)
             if pd.isna(timestamp):
                 return False
-            threshold = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=days)
-            return bool(timestamp >= threshold)
+            return bool(timestamp >= pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=days))
         if rule_type == "range":
             try:
                 numeric = float(value)
@@ -150,8 +151,13 @@ def load_quality_config(path: Path) -> dict[str, Any] | None:
     return parsed
 
 
+def _fingerprint(rules: list[dict[str, Any]], dimensions: list[dict[str, Any]]) -> str:
+    payload = json.dumps({"rules": rules, "dimensions": dimensions}, sort_keys=True, separators=(",", ":"), default=str)
+    return f"sha256-{hashlib.sha256(payload.encode('utf-8')).hexdigest()[:16]}"
+
+
 def evaluate_quality(frame: pd.DataFrame, dataset_id: str, config: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Return weighted quality and strict record compliance, or None when no governed rules exist."""
+    """Return weighted governed quality and strict record compliance, or None when no rules exist."""
     if not config:
         return None
     dimension_definitions = {
@@ -185,17 +191,15 @@ def evaluate_quality(frame: pd.DataFrame, dataset_id: str, config: dict[str, Any
         })
 
     dimensions: list[dict[str, Any]] = []
-    dimension_names: list[str] = []
-    for item in evaluations:
-        name = str(item["rule"].get("dimension"))
-        if name not in dimension_names:
-            dimension_names.append(name)
+    dimension_names = list(dict.fromkeys(str(item["rule"].get("dimension")) for item in evaluations))
+    used_definitions: list[dict[str, Any]] = []
     for name in dimension_names:
         items = [item for item in evaluations if str(item["rule"].get("dimension")) == name]
         rule_weight = sum(float(item["weight"]) for item in items)
         score = sum(float(item["score"]) * float(item["weight"]) for item in items) / rule_weight if rule_weight else 100.0
         strict_passes = pd.concat([item["passes"].rename(str(index)) for index, item in enumerate(items)], axis=1).all(axis=1)
         definition = dimension_definitions[name.lower()]
+        used_definitions.append(definition)
         dimensions.append({
             "dimension": name,
             "score": score,
@@ -209,7 +213,12 @@ def evaluate_quality(frame: pd.DataFrame, dataset_id: str, config: dict[str, Any
     overall = sum(float(item["score"]) * float(item["weight"]) for item in dimensions) / dimension_weight if dimension_weight else 100.0
     all_pass = pd.concat([item["passes"].rename(str(index)) for index, item in enumerate(evaluations)], axis=1).all(axis=1)
     strict = float(all_pass.mean() * 100.0) if len(frame) else 100.0
+    fingerprint = _fingerprint(rules, used_definitions)
     return {
+        "evaluation_status": "governed",
+        "engine_version": ENGINE_VERSION,
+        "configuration_fingerprint": fingerprint,
+        "evaluation_snapshot": {"version": 1, "engine_version": ENGINE_VERSION, "configuration_fingerprint": fingerprint, "rules": rules, "dimensions": used_definitions},
         "overall_score": overall,
         "record_compliance_score": strict,
         "passing_records": int(all_pass.sum()),
@@ -221,6 +230,10 @@ def evaluate_quality(frame: pd.DataFrame, dataset_id: str, config: dict[str, Any
                 "rule_id": str(item["rule"].get("id") or ""),
                 "rule_name": str(item["rule"].get("name") or "Rule"),
                 "dimension": str(item["rule"].get("dimension") or ""),
+                "column_name": str(item["rule"].get("columnName") or ""),
+                "rule_type": str(item["rule"].get("ruleType") or ""),
+                "expected_value": item["rule"].get("expectedValue"),
+                "secondary_value": item["rule"].get("secondaryValue"),
                 "score": float(item["score"]),
                 "weight": float(item["weight"]),
                 "threshold": float(item["threshold"]),

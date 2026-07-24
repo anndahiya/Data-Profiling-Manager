@@ -18,8 +18,7 @@
     "react-dom": "19.2.7",
     "react-router-dom": "7.18.1",
     "read-excel-file": "9.3.3",
-    "recharts": "3.10.0",
-    "xlsx": "0.18.5"
+    "recharts": "3.10.0"
   },
   "devDependencies": {
     "@types/papaparse": "5.5.2",

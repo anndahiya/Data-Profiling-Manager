@@ -30,7 +30,8 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: "24"
-          package-manager-cache: false
+          package-manager-cache: npm
+          cache-dependency-path: enterprise-ui/package-lock.json
 
       - name: Validate Cloudflare credentials
         shell: bash
@@ -47,8 +48,11 @@ jobs:
             exit 1
           fi
 
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
+      - name: Install frozen dependencies
+        run: npm ci --no-fund
+
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
 
       - name: Run tests
         run: npm test
