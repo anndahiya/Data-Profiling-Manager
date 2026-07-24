@@ -1,9 +1,10 @@
 import Dexie, { type EntityTable } from 'dexie';
-import type { DatabaseConnection, Dataset, Issue, LinkedSourceHandle, MonitorPolicy, ProfileRun, QualityDimension, QualityRule, WorkspaceSettings } from './types';
+import type { DatabaseConnection, Dataset, Issue, LinkedSourceHandle, MonitorPolicy, ProfileFailure, ProfileRun, QualityDimension, QualityRule, WorkspaceSettings } from './types';
 
 class DpmDatabase extends Dexie {
   datasets!: EntityTable<Dataset, 'id'>;
   runs!: EntityTable<ProfileRun, 'id'>;
+  failures!: EntityTable<ProfileFailure, 'id'>;
   issues!: EntityTable<Issue, 'id'>;
   rules!: EntityTable<QualityRule, 'id'>;
   dimensions!: EntityTable<QualityDimension, 'id'>;
@@ -26,13 +27,14 @@ class DpmDatabase extends Dexie {
     this.version(4).stores({ ...base, dimensions: 'id, name, enabled, source, updatedAt', monitors: 'id, datasetId, enabled, cadence, updatedAt', sourceHandles: 'datasetId, kind, updatedAt' });
     this.version(5).stores({ ...base, dimensions: 'id, name, enabled, source, updatedAt', monitors: 'id, datasetId, enabled, cadence, updatedAt', connections: 'id, datasetId, provider, enabled, updatedAt', sourceHandles: 'datasetId, kind, updatedAt' });
     this.version(6).stores({ ...base, dimensions: 'id, name, enabled, source, updatedAt', monitors: 'id, datasetId, enabled, cadence, updatedAt', connections: 'id, datasetId, provider, enabled, updatedAt', sourceHandles: 'datasetId, kind, updatedAt', settings: 'id, updatedAt' });
+    this.version(7).stores({ ...base, failures: 'id, datasetId, failedAt, stage, sourceMode', dimensions: 'id, name, enabled, source, updatedAt', monitors: 'id, datasetId, enabled, cadence, updatedAt', connections: 'id, datasetId, provider, enabled, updatedAt', sourceHandles: 'datasetId, kind, updatedAt', settings: 'id, updatedAt' });
   }
 }
 
 export const db = new DpmDatabase();
 
 export async function clearWorkspace(): Promise<void> {
-  await db.transaction('rw', [db.datasets, db.runs, db.issues, db.rules, db.dimensions, db.monitors, db.connections, db.sourceHandles, db.settings], async () => {
-    await Promise.all([db.datasets.clear(), db.runs.clear(), db.issues.clear(), db.rules.clear(), db.dimensions.clear(), db.monitors.clear(), db.connections.clear(), db.sourceHandles.clear(), db.settings.clear()]);
+  await db.transaction('rw', [db.datasets, db.runs, db.failures, db.issues, db.rules, db.dimensions, db.monitors, db.connections, db.sourceHandles, db.settings], async () => {
+    await Promise.all([db.datasets.clear(), db.runs.clear(), db.failures.clear(), db.issues.clear(), db.rules.clear(), db.dimensions.clear(), db.monitors.clear(), db.connections.clear(), db.sourceHandles.clear(), db.settings.clear()]);
   });
 }
