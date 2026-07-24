@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, RefreshCw, Sparkles } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { enhanceProfileRun } from '../advancedProfiler';
 import { PageHeader } from '../components';
 import { db } from '../db';
 import { compareSchema, createIssues, parseFile, profileRows } from '../profiler';
@@ -102,7 +103,7 @@ export function ProfilePage({ workspace, reload }: { workspace: WorkspaceSnapsho
       let selectedFile: File; let sourceKind: ProfileRun['sourceKind']; let sourceReference: string; let storedHandle: LinkedSourceHandle | undefined;
       if (sourceMode === 'manual-upload') {
         if (!file) throw new Error('Choose a file to profile.');
-        selectedFile = file; sourceReference = file.name; sourceKind = file.name.toLowerCase().endsWith('.xlsx') ? 'Excel' : 'CSV';
+        selectedFile = file; sourceReference = file.name; sourceKind = /\.xlsx?$/i.test(file.name) ? 'Excel' : 'CSV';
       } else {
         if (!linkedHandle) throw new Error('Link a file or folder before running the profile.');
         const resolved = await resolveLinkedSource(source, linkedHandle);
@@ -111,7 +112,7 @@ export function ProfilePage({ workspace, reload }: { workspace: WorkspaceSnapsho
         storedHandle = { ...linkedHandle, datasetId: targetId };
       }
       const parsed = await parseFile(selectedFile);
-      const baseRun = profileRows(parsed.rows, targetId, selectedFile.name, sourceKind);
+      const baseRun = enhanceProfileRun(parsed.rows, profileRows(parsed.rows, targetId, selectedFile.name, sourceKind));
       const configuredRules = workspace.rules.filter((rule) => rule.datasetId === targetId);
       const run: ProfileRun = {
         ...baseRun,
