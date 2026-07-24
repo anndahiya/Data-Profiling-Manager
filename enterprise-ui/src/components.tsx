@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { ArrowLeft, Check, ChevronRight, Database, FileSearch, ShieldCheck } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { hasGovernedQuality } from './scoring';
 import type { DimensionResult, Issue, IssueStatus, ProfileRun, WorkspaceSnapshot } from './types';
 import { formatDate, latestRunFor } from './utils';
 
@@ -23,7 +24,8 @@ export function MetricCard({ label, value, detail, tone = 'neutral', icon }: {
   return <div className={`metric-card ${tone}`}><div className="metric-label">{icon}{label}</div><div className="metric-value">{value}</div>{detail && <div className="metric-detail">{detail}</div>}</div>;
 }
 
-export function ScoreBadge({ score }: { score: number }) {
+export function ScoreBadge({ score, available = true }: { score: number; available?: boolean }) {
+  if (!available) return <span className="score-badge"><span>N/A</span></span>;
   const tone = score >= 95 ? 'good' : score >= 85 ? 'warning' : 'bad';
   return <span className={`score-badge ${tone}`}><span>{score.toFixed(1)}%</span></span>;
 }
@@ -41,14 +43,14 @@ export function AssetTable({ workspace, compact = false }: { workspace: Workspac
     {workspace.datasets.slice(0, compact ? 5 : undefined).map((dataset) => {
       const run = latestRunFor(dataset.id, workspace.runs);
       const issueCount = workspace.issues.filter((issue) => issue.datasetId === dataset.id && issue.status === 'Open').length;
-      return <tr key={dataset.id}><td><div className="asset-cell"><div className="asset-icon"><Database size={17} /></div><div><Link to={`/assets/${dataset.id}`}>{dataset.name}</Link><span>{dataset.owner || 'No owner'} · {dataset.tags.join(', ') || 'No tags'}</span></div></div></td><td>{formatDate(run?.createdAt)}</td><td>{run ? run.rowCount.toLocaleString() : '—'}</td><td>{run ? <ScoreBadge score={run.quality.overallScore} /> : '—'}</td><td><span className={issueCount ? 'issue-count' : 'muted'}>{issueCount}</span></td><td><Link className="row-action" to={`/assets/${dataset.id}`} aria-label={`Open ${dataset.name}`}><ChevronRight size={17} /></Link></td></tr>;
+      return <tr key={dataset.id}><td><div className="asset-cell"><div className="asset-icon"><Database size={17} /></div><div><Link to={`/assets/${dataset.id}`}>{dataset.name}</Link><span>{dataset.owner || 'No owner'} · {dataset.tags.join(', ') || 'No tags'}</span></div></div></td><td>{formatDate(run?.createdAt)}</td><td>{run ? run.rowCount.toLocaleString() : '—'}</td><td>{run ? <ScoreBadge score={run.quality.overallScore} available={hasGovernedQuality(run.quality)} /> : '—'}</td><td><span className={issueCount ? 'issue-count' : 'muted'}>{issueCount}</span></td><td><Link className="row-action" to={`/assets/${dataset.id}`} aria-label={`Open ${dataset.name}`}><ChevronRight size={17} /></Link></td></tr>;
     })}
   </tbody></table></div>;
 }
 
 export function RunList({ runs }: { runs: ProfileRun[] }) {
   return <div className="table-wrap"><table><thead><tr><th>Run date</th><th>File</th><th>Rows</th><th>Quality</th><th /></tr></thead><tbody>
-    {runs.map((run) => <tr key={run.id}><td>{formatDate(run.createdAt)}</td><td>{run.fileName}</td><td>{run.rowCount.toLocaleString()}</td><td><ScoreBadge score={run.quality.overallScore} /></td><td><Link className="row-action labeled" to={`/runs/${run.id}`}>Open <ChevronRight size={15} /></Link></td></tr>)}
+    {runs.map((run) => <tr key={run.id}><td>{formatDate(run.createdAt)}</td><td>{run.fileName}</td><td>{run.rowCount.toLocaleString()}</td><td><ScoreBadge score={run.quality.overallScore} available={hasGovernedQuality(run.quality)} /></td><td><Link className="row-action labeled" to={`/runs/${run.id}`}>Open <ChevronRight size={15} /></Link></td></tr>)}
   </tbody></table></div>;
 }
 
