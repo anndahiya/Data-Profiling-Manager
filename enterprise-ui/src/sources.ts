@@ -1,6 +1,6 @@
 import type { DatasetSource, LinkedSourceHandle } from './types';
 
-const SUPPORTED_EXTENSIONS = ['.csv', '.txt', '.xlsx'];
+const SUPPORTED_EXTENSIONS = ['.csv', '.txt', '.xlsx', '.xls'];
 
 export interface FileSystemHandlePermissionDescriptor {
   mode?: 'read' | 'readwrite';
@@ -77,6 +77,7 @@ export async function pickLinkedFile(): Promise<BrowserFileHandle> {
       accept: {
         'text/csv': ['.csv', '.txt'],
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+        'application/vnd.ms-excel': ['.xls'],
       },
     }],
   });
@@ -117,7 +118,7 @@ export async function resolveLinkedSource(
   }
   if (stored.kind === 'file') {
     const file = await stored.handle.getFile();
-    if (!isSupportedDataFile(file.name)) throw new Error('The linked file is no longer a supported CSV, TXT, or XLSX file.');
+    if (!isSupportedDataFile(file.name)) throw new Error('The linked file is no longer a supported CSV, TXT, XLSX, or XLS file.');
     return { file, sourceLabel: file.name };
   }
 
