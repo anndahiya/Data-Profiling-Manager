@@ -4,13 +4,15 @@ import { useLocation, useNavigate } from 'react-router';
 import { PageHeader } from '../components';
 import { db } from '../db';
 import { reconcileIssueSet } from '../issueLifecycle';
+import { DEFAULT_NULL_TOKENS, formatNullTokens, parseNullTokenInput } from '../nullPolicy';
 import { compareSchema, createIssues } from '../profiler';
-import { startProfileWorker, type ProfileWorkerJob } from '../profileWorkerClient';
+import { createProfileFailure } from '../profileFailures';
+import { ProfileWorkerError, startProfileWorker, type ProfileWorkerJob } from '../profileWorkerClient';
 import { createQualityIssues } from '../quality';
 import { applyRetentionPolicy } from '../retention';
 import { SourcePicker } from '../SourcePicker';
 import { pickLinkedDirectory, pickLinkedFile, resolveLinkedSource, supportsPersistentFileAccess } from '../sources';
-import type { Dataset, DatasetSource, LinkedSourceHandle, ProfileRun, SchemaDiff, SourceMode, WorkspaceSnapshot } from '../types';
+import type { Dataset, DatasetSource, LinkedSourceHandle, ProfileFailureStage, ProfileRun, SchemaDiff, SourceMode, WorkspaceSnapshot } from '../types';
 import { latestRunFor } from '../utils';
 
 type PendingRun = { run: ProfileRun; diff: SchemaDiff; existing?: Dataset; source: DatasetSource; handle?: LinkedSourceHandle };
@@ -22,6 +24,7 @@ export function ProfilePage({ workspace, reload }: { workspace: WorkspaceSnapsho
   const [name, setName] = useState('');
   const [owner, setOwner] = useState('');
   const [description, setDescription] = useState('');
+  const [nullTokenInput, setNullTokenInput] = useState(formatNullTokens(DEFAULT_NULL_TOKENS));
   const [sourceMode, setSourceMode] = useState<SourceMode>('manual-upload');
   const [file, setFile] = useState<File | null>(null);
   const [linkedHandle, setLinkedHandle] = useState<LinkedSourceHandle | null>(null);
@@ -43,6 +46,7 @@ export function ProfilePage({ workspace, reload }: { workspace: WorkspaceSnapsho
       setFile(null); setError('');
       if (selectedDataset) {
         setName(selectedDataset.name); setOwner(selectedDataset.owner); setDescription(selectedDataset.description);
+        setNullTokenInput(formatNullTokens(selectedDataset.nullTokens));
         const source = selectedDataset.source ?? { mode: 'manual-upload' as const };
         setSourceMode(source.mode === 'database' ? 'manual-upload' : source.mode);
         setSourceLabel(source.displayName ?? ''); setFilePattern(source.filePattern ?? '*.csv');
@@ -50,7 +54,7 @@ export function ProfilePage({ workspace, reload }: { workspace: WorkspaceSnapsho
         const stored = await db.sourceHandles.get(selectedDataset.id);
         if (active) setLinkedHandle(stored ?? null);
       } else {
-        setName(''); setOwner(''); setDescription(''); setSourceMode('manual-upload'); setFile(null);
+        setName(''); setOwner(''); setDescription(''); setNullTokenInput(formatNullTokens(DEFAULT_NULL_TOKENS)); setSourceMode('manual-upload'); setFile(null);
         setLinkedHandle(null); setSourceLabel(''); setFilePattern('*.csv'); setSelectionStrategy('latest-modified');
       }
     };
@@ -109,10 +113,14 @@ export function ProfilePage({ workspace, reload }: { workspace: WorkspaceSnapsho
 
   const handleProfile = async () => {
     if (!name.trim()) return;
+    const startedAt = new Date().toISOString();
+    const targetId = selectedDataset?.id ?? crypto.randomUUID();
+    let failureStage: ProfileFailureStage = 'source-selection';
+    let selectedSourceName = file?.name ?? sourceLabel;
     setProcessing(true); setProgress('Preparing the profiling worker…'); setError('');
     try {
-      const targetId = selectedDataset?.id ?? crypto.randomUUID();
       const source = sourceConfig();
+      const nullTokens = parseNullTokenInput(nullTokenInput);
       let selectedFile: File; let sourceKind: ProfileRun['sourceKind']; let sourceReference: string; let storedHandle: LinkedSourceHandle | undefined;
       if (sourceMode === 'manual-upload') {
         if (!file) throw new Error('Choose a file to profile.');
@@ -124,22 +132,34 @@ export function ProfilePage({ workspace, reload }: { workspace: WorkspaceSnapsho
         sourceKind = sourceMode === 'linked-folder' ? 'Linked folder' : 'Linked file';
         storedHandle = { ...linkedHandle, datasetId: targetId };
       }
+      selectedSourceName = sourceReference;
+      failureStage = 'file-validation';
       const configuredRules = workspace.rules.filter((rule) => rule.datasetId === targetId);
-      const job = startProfileWorker({ file: selectedFile, datasetId: targetId, sourceKind, rules: configuredRules, dimensions: workspace.dimensions }, setProgress);
+      const job = startProfileWorker({ file: selectedFile, datasetId: targetId, sourceKind, rules: configuredRules, dimensions: workspace.dimensions, nullTokens }, (status) => { failureStage = status.stage; setProgress(status.message); });
       jobRef.current = job;
       const workerRun = await job.promise;
       jobRef.current = null;
-      const run: ProfileRun = { ...workerRun, sourceReference };
+      const run: ProfileRun = { ...workerRun, sourceReference, nullTokens };
       const diff = compareSchema(selectedDataset ? latestRunFor(selectedDataset.id, workspace.runs) : undefined, run.columns);
       if (selectedDataset && diff.hasChanges) setPending({ run, diff, existing: selectedDataset, source, handle: storedHandle });
       else {
+        failureStage = 'saving';
         const now = new Date().toISOString();
-        const dataset = selectedDataset ? { ...selectedDataset, source } : { id: targetId, name: name.trim(), owner: owner.trim(), description: description.trim(), tags: [], createdAt: now, updatedAt: now, source };
+        const dataset = selectedDataset
+          ? { ...selectedDataset, source, nullTokens }
+          : { id: targetId, name: name.trim(), owner: owner.trim(), description: description.trim(), tags: [], createdAt: now, updatedAt: now, source, nullTokens };
         await commitRun(run, dataset, storedHandle);
       }
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === 'AbortError') setError('Profiling was cancelled. No run was saved.');
-      else setError(caught instanceof Error ? caught.message : 'Profiling failed.');
+      else {
+        const stage = caught instanceof ProfileWorkerError ? caught.stage : failureStage;
+        const failure = createProfileFailure({ datasetId: selectedDataset?.id, assetName: name, sourceName: selectedSourceName, sourceMode, startedAt, stage, error: caught });
+        await db.failures.put(failure);
+        await applyRetentionPolicy(workspace.settings);
+        await reload();
+        setError(`${failure.message} The failed attempt was saved in Run history.`);
+      }
     } finally {
       jobRef.current = null;
       setProcessing(false);
@@ -152,7 +172,7 @@ export function ProfilePage({ workspace, reload }: { workspace: WorkspaceSnapsho
     if (!pending) return;
     const now = new Date().toISOString(); const newId = crypto.randomUUID();
     const newRun = { ...pending.run, id: crypto.randomUUID(), datasetId: newId };
-    await commitRun(newRun, { id: newId, name: `${name.trim()} — ${newRun.fileName.replace(/\.[^.]+$/, '') || 'new schema'}`, owner: owner.trim(), description: description.trim(), tags: ['Schema variant'], createdAt: now, updatedAt: now, source: pending.source }, pending.handle ? { ...pending.handle, datasetId: newId } : undefined);
+    await commitRun(newRun, { id: newId, name: `${name.trim()} — ${newRun.fileName.replace(/\.[^.]+$/, '') || 'new schema'}`, owner: owner.trim(), description: description.trim(), tags: ['Schema variant'], createdAt: now, updatedAt: now, source: pending.source, nullTokens: pending.run.nullTokens }, pending.handle ? { ...pending.handle, datasetId: newId } : undefined);
     setPending(null);
   };
 
@@ -164,11 +184,11 @@ export function ProfilePage({ workspace, reload }: { workspace: WorkspaceSnapsho
     {error && <div className="alert error" role="alert" aria-live="assertive"><AlertTriangle size={17} />{error}</div>}
     {!governedEvaluation && <div className="alert warning"><AlertTriangle size={17} /><span>The data profile will run, but the official DQ score will show N/A until you add and enable governed rules for this asset. Profiling-based suggestions remain recommendations only.</span></div>}
     <div className="wizard-grid">
-      <section className="panel form-panel"><div className="step-label"><span>1</span> Select destination</div><label className="field"><span>Data asset</span><select value={datasetId} disabled={processing} onChange={(event) => setDatasetId(event.target.value)}><option value="new">Create a new asset</option>{workspace.datasets.map((dataset) => <option value={dataset.id} key={dataset.id}>{dataset.name}</option>)}</select></label><div className="field-grid"><label className="field"><span>Asset name</span><input value={name} disabled={processing} onChange={(event) => setName(event.target.value)} placeholder="Customer master" /></label><label className="field"><span>Owner / steward</span><input value={owner} disabled={processing} onChange={(event) => setOwner(event.target.value)} placeholder="Customer Data Office" /></label></div><label className="field"><span>Description</span><textarea value={description} disabled={processing} onChange={(event) => setDescription(event.target.value)} placeholder="What this dataset contains and where it is used" /></label></section>
+      <section className="panel form-panel"><div className="step-label"><span>1</span> Select destination</div><label className="field"><span>Data asset</span><select value={datasetId} disabled={processing} onChange={(event) => setDatasetId(event.target.value)}><option value="new">Create a new asset</option>{workspace.datasets.map((dataset) => <option value={dataset.id} key={dataset.id}>{dataset.name}</option>)}</select></label><div className="field-grid"><label className="field"><span>Asset name</span><input value={name} disabled={processing} onChange={(event) => setName(event.target.value)} placeholder="Customer master" /></label><label className="field"><span>Owner / steward</span><input value={owner} disabled={processing} onChange={(event) => setOwner(event.target.value)} placeholder="Customer Data Office" /></label></div><label className="field"><span>Description</span><textarea value={description} disabled={processing} onChange={(event) => setDescription(event.target.value)} placeholder="What this dataset contains and where it is used" /></label><label className="field"><span>Values treated as missing</span><input value={nullTokenInput} disabled={processing} onChange={(event) => setNullTokenInput(event.target.value)} placeholder="null, n/a, nan, (blank)" /><small>Comma-separated and case-insensitive. Empty cells are always missing. This policy is saved with the asset and frozen with each completed run.</small></label></section>
       <SourcePicker sourceMode={sourceMode} setSourceMode={(value) => { if (!processing) { setSourceMode(value); setError(''); } }} file={file} setFile={setFile} sourceLabel={sourceLabel} filePattern={filePattern} setFilePattern={setFilePattern} selectionStrategy={selectionStrategy} setSelectionStrategy={setSelectionStrategy} persistentAccessSupported={supportsPersistentFileAccess()} linking={linking || processing} chooseLinkedFile={() => void chooseFile()} chooseLinkedFolder={() => void chooseFolder()} />
     </div>
     <div className="sticky-action" aria-live="polite"><div><strong>{processing ? 'Profiling in the background' : sourceMode === 'manual-upload' ? 'Ready to profile?' : 'Ready to refresh this asset?'}</strong><span>{processing ? progress : sourceMode === 'linked-folder' ? `The app will select the ${selectionStrategy === 'latest-modified' ? 'most recently modified' : 'highest-version'} file matching ${filePattern || '*'}.` : sourceMode === 'linked-file' ? 'The app will read the latest saved contents of the linked file.' : governedEvaluation ? `${configuredRuleCount} governed rules will be evaluated.` : 'The profile will be saved without an official DQ score.'}</span></div><div className="button-row">{processing && <button className="secondary-button" onClick={cancelProfile}><X size={16} /> Cancel</button>}<button className="primary-button" disabled={!canRun || processing} onClick={() => void handleProfile()}>{processing ? <RefreshCw className="spin" size={17} /> : <Sparkles size={17} />} {processing ? 'Profiling…' : governedEvaluation ? 'Run profile & DQ evaluation' : 'Run profile'}</button></div></div>
-    {pending && <SchemaDialog diff={pending.diff} onCancel={() => setPending(null)} onContinue={() => void commitRun(pending.run, { ...pending.existing!, source: pending.source }, pending.handle)} onSaveNew={() => void saveAsNew()} />}
+    {pending && <SchemaDialog diff={pending.diff} onCancel={() => setPending(null)} onContinue={() => void commitRun(pending.run, { ...pending.existing!, source: pending.source, nullTokens: pending.run.nullTokens }, pending.handle)} onSaveNew={() => void saveAsNew()} />}
   </>;
 }
 
