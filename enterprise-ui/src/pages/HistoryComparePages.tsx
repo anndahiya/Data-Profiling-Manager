@@ -4,13 +4,16 @@ import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAx
 import { Link } from 'react-router';
 import { EmptyState, PageHeader, ScoreBadge } from '../components';
 import { db } from '../db';
+import { failureStageLabel } from '../profileFailures';
 import { compareSchema } from '../profiler';
+import { hasGovernedQuality } from '../scoring';
 import type { ProfileRun, WorkspaceSnapshot } from '../types';
 import { formatDate } from '../utils';
 import { ConfirmDialog } from './SettingsPage';
 
 export function HistoryPage({ workspace, reload }: { workspace: WorkspaceSnapshot; reload: () => Promise<void> }) {
   const runs = [...workspace.runs].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const failures = [...(workspace.failures ?? [])].sort((a, b) => b.failedAt.localeCompare(a.failedAt));
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirming, setConfirming] = useState(false);
   const toggle = (id: string) => setSelected((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
@@ -29,14 +32,20 @@ export function HistoryPage({ workspace, reload }: { workspace: WorkspaceSnapsho
     });
     setSelected(new Set()); setConfirming(false); await reload();
   };
+  const deleteFailure = async (id: string) => { await db.failures.delete(id); await reload(); };
+  const clearFailures = async () => {
+    if (!window.confirm(`Delete all ${failures.length} saved failed attempt${failures.length === 1 ? '' : 's'}?`)) return;
+    await db.failures.clear(); await reload();
+  };
   return <>
-    <PageHeader title="Run history" description="Review, open, compare, export, or delete specific saved profiling runs." actions={selected.size > 0 && <button className="danger-button" onClick={() => setConfirming(true)}><Trash2 size={16} /> Delete selected ({selected.size})</button>} />
-    {!runs.length ? <EmptyState title="No profiling history" body="Profile a dataset to create the first saved run." action={<Link className="primary-button" to="/profile">Profile data</Link>} /> : <div className="table-wrap"><table><thead><tr><th className="checkbox-cell"><input aria-label="Select all runs" type="checkbox" checked={selected.size === runs.length && runs.length > 0} onChange={() => setSelected(selected.size === runs.length ? new Set() : new Set(runs.map((run) => run.id)))} /></th><th>Data asset</th><th>Run</th><th>Rows</th><th>Schema</th><th>Quality</th><th>Issues</th><th /></tr></thead><tbody>{runs.map((run) => {
+    <PageHeader title="Run history" description="Review completed profiles and failed attempts. Failed attempts retain the stage and error without saving partial profile results." actions={<div className="button-row">{failures.length > 0 && <button className="secondary-button" onClick={() => void clearFailures()}><Trash2 size={16} /> Clear failed attempts</button>}{selected.size > 0 && <button className="danger-button" onClick={() => setConfirming(true)}><Trash2 size={16} /> Delete selected ({selected.size})</button>}</div>} />
+    {failures.length > 0 && <section className="panel history-failures"><div className="panel-heading"><div><h2>Failed attempts</h2><p>These attempts did not create a completed run or alter the asset’s latest successful profile.</p></div><span className="status-chip warning">{failures.length} retained</span></div><div className="table-wrap"><table><thead><tr><th>Attempted</th><th>Data asset</th><th>Source</th><th>Failure stage</th><th>Error</th><th /></tr></thead><tbody>{failures.map((failure) => <tr key={failure.id}><td>{formatDate(failure.failedAt)}</td><td>{failure.datasetId && workspace.datasets.some((item) => item.id === failure.datasetId) ? <Link to={`/assets/${failure.datasetId}`}>{failure.assetName}</Link> : failure.assetName}</td><td><strong>{failure.sourceName || 'Source not resolved'}</strong><span className="cell-subtitle">{failure.sourceMode}</span></td><td><span className="status-chip warning">{failureStageLabel(failure.stage)}</span></td><td><strong>{failure.errorName || 'Error'}</strong><span className="cell-subtitle">{failure.message}</span></td><td><button className="icon-button" aria-label={`Delete failed attempt for ${failure.assetName}`} onClick={() => void deleteFailure(failure.id)}><Trash2 size={14} /></button></td></tr>)}</tbody></table></div></section>}
+    {!runs.length ? <EmptyState title="No completed profiling history" body={failures.length ? 'Fix the failed source or configuration and run the profile again.' : 'Profile a dataset to create the first saved run.'} action={<Link className="primary-button" to="/profile">Profile data</Link>} /> : <div className="table-wrap"><table><thead><tr><th className="checkbox-cell"><input aria-label="Select all runs" type="checkbox" checked={selected.size === runs.length && runs.length > 0} onChange={() => setSelected(selected.size === runs.length ? new Set() : new Set(runs.map((run) => run.id)))} /></th><th>Data asset</th><th>Run</th><th>Rows</th><th>Schema</th><th>Quality</th><th>Issues</th><th /></tr></thead><tbody>{runs.map((run) => {
       const dataset = workspace.datasets.find((item) => item.id === run.datasetId);
-      const issueCount = workspace.issues.filter((issue) => issue.runId === run.id).length;
+      const issueCount = workspace.issues.filter((issue) => issue.runId === run.id || issue.latestRunId === run.id).length;
       const previous = workspace.runs.filter((item) => item.datasetId === run.datasetId && item.createdAt < run.createdAt).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
       const changed = compareSchema(previous, run.columns).hasChanges;
-      return <tr key={run.id} className={selected.has(run.id) ? 'selected-row' : ''}><td className="checkbox-cell"><input aria-label={`Select ${run.fileName}`} type="checkbox" checked={selected.has(run.id)} onChange={() => toggle(run.id)} /></td><td><Link to={`/assets/${run.datasetId}`}>{dataset?.name ?? 'Unknown asset'}</Link></td><td><strong>{formatDate(run.createdAt)}</strong><span className="cell-subtitle">{run.fileName}</span></td><td>{run.rowCount.toLocaleString()}</td><td>{changed ? <span className="status-chip warning"><AlertTriangle size={13} /> Changed</span> : <span className="status-chip good"><Check size={13} /> Stable</span>}</td><td><ScoreBadge score={run.quality.overallScore} /></td><td>{issueCount}</td><td><Link className="row-action labeled" to={`/runs/${run.id}`}>Open <ChevronRight size={15} /></Link></td></tr>;
+      return <tr key={run.id} className={selected.has(run.id) ? 'selected-row' : ''}><td className="checkbox-cell"><input aria-label={`Select ${run.fileName}`} type="checkbox" checked={selected.has(run.id)} onChange={() => toggle(run.id)} /></td><td><Link to={`/assets/${run.datasetId}`}>{dataset?.name ?? 'Unknown asset'}</Link></td><td><strong>{formatDate(run.createdAt)}</strong><span className="cell-subtitle">{run.fileName}</span></td><td>{run.rowCount.toLocaleString()}</td><td>{changed ? <span className="status-chip warning"><AlertTriangle size={13} /> Changed</span> : <span className="status-chip good"><Check size={13} /> Stable</span>}</td><td><ScoreBadge score={run.quality.overallScore} available={hasGovernedQuality(run.quality)} /></td><td>{issueCount}</td><td><Link className="row-action labeled" to={`/runs/${run.id}`}>Open <ChevronRight size={15} /></Link></td></tr>;
     })}</tbody></table></div>}
     {confirming && <ConfirmDialog title={`Delete ${selected.size} saved run${selected.size === 1 ? '' : 's'}?`} body="Only the checked runs will be deleted. Their generated issues will also be removed. Other runs and datasets remain unchanged." confirmLabel="Delete selected runs" onCancel={() => setConfirming(false)} onConfirm={() => void deleteSelected()} />}
   </>;
