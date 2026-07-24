@@ -2,20 +2,17 @@ import type { ColumnClassification, ColumnProfile, CorrelationValue, DataType, P
 import type { DataRow } from './profiler';
 
 export const MAX_CORRELATION_COLUMNS = 40;
+const NULL_TOKENS = ['', 'null', 'n/a', 'nan', '(blank)'];
 
 function isMissing(value: unknown): boolean {
   if (value === null || value === undefined) return true;
   if (typeof value === 'number' && Number.isNaN(value)) return true;
-  if (typeof value === 'string') return ['', 'null', 'none', 'n/a', 'na', 'nan', 'unknown', '(blank)'].includes(value.trim().toLowerCase());
+  if (typeof value === 'string') return NULL_TOKENS.includes(value.trim().toLowerCase());
   return false;
 }
 
 function finiteNumbers(rows: DataRow[], column: string): number[] {
-  return rows
-    .map((row) => row[column])
-    .filter((value) => !isMissing(value))
-    .map(Number)
-    .filter(Number.isFinite);
+  return rows.map((row) => row[column]).filter((value) => !isMissing(value)).map(Number).filter(Number.isFinite);
 }
 
 function distributionShape(values: number[]): { skewness?: number; kurtosis?: number } {
@@ -27,10 +24,7 @@ function distributionShape(values: number[]): { skewness?: number; kurtosis?: nu
   if (!m2) return { skewness: 0, kurtosis: 0 };
   const m3 = centered.reduce((sum, value) => sum + value ** 3, 0) / count;
   const m4 = centered.reduce((sum, value) => sum + value ** 4, 0) / count;
-  return {
-    skewness: m3 / Math.pow(m2, 1.5),
-    kurtosis: m4 / (m2 ** 2) - 3,
-  };
+  return { skewness: m3 / Math.pow(m2, 1.5), kurtosis: m4 / (m2 ** 2) - 3 };
 }
 
 function classification(column: ColumnProfile): ColumnClassification {
@@ -46,21 +40,13 @@ function classification(column: ColumnProfile): ColumnClassification {
 function textStatistics(rows: DataRow[], column: string) {
   const lengths = rows.map((row) => row[column]).filter((value) => !isMissing(value)).map((value) => String(value).length);
   if (!lengths.length) return undefined;
-  return {
-    minLength: Math.min(...lengths),
-    maxLength: Math.max(...lengths),
-    meanLength: lengths.reduce((sum, value) => sum + value, 0) / lengths.length,
-  };
+  return { minLength: Math.min(...lengths), maxLength: Math.max(...lengths), meanLength: lengths.reduce((sum, value) => sum + value, 0) / lengths.length };
 }
 
 function dateStatistics(rows: DataRow[], column: string) {
   const timestamps = rows.map((row) => row[column]).filter((value) => !isMissing(value)).map((value) => value instanceof Date ? value.getTime() : Date.parse(String(value))).filter(Number.isFinite).sort((a, b) => a - b);
   if (!timestamps.length) return undefined;
-  return {
-    min: new Date(timestamps[0]).toISOString(),
-    max: new Date(timestamps[timestamps.length - 1]).toISOString(),
-    rangeDays: (timestamps[timestamps.length - 1] - timestamps[0]) / 86_400_000,
-  };
+  return { min: new Date(timestamps[0]).toISOString(), max: new Date(timestamps[timestamps.length - 1]).toISOString(), rangeDays: (timestamps[timestamps.length - 1] - timestamps[0]) / 86_400_000 };
 }
 
 export function enrichColumnProfiles(rows: DataRow[], columns: ColumnProfile[]): ColumnProfile[] {
@@ -86,24 +72,17 @@ function pearson(left: Array<number | undefined>, right: Array<number | undefine
   if (pairs.length < 2) return undefined;
   const leftMean = pairs.reduce((sum, pair) => sum + pair[0], 0) / pairs.length;
   const rightMean = pairs.reduce((sum, pair) => sum + pair[1], 0) / pairs.length;
-  let numerator = 0;
-  let leftSquares = 0;
-  let rightSquares = 0;
+  let numerator = 0; let leftSquares = 0; let rightSquares = 0;
   pairs.forEach(([leftValue, rightValue]) => {
-    const leftDelta = leftValue - leftMean;
-    const rightDelta = rightValue - rightMean;
-    numerator += leftDelta * rightDelta;
-    leftSquares += leftDelta ** 2;
-    rightSquares += rightDelta ** 2;
+    const leftDelta = leftValue - leftMean; const rightDelta = rightValue - rightMean;
+    numerator += leftDelta * rightDelta; leftSquares += leftDelta ** 2; rightSquares += rightDelta ** 2;
   });
   const denominator = Math.sqrt(leftSquares * rightSquares);
   return denominator ? numerator / denominator : undefined;
 }
 
 export function correlationProfile(rows: DataRow[], columns: ColumnProfile[]): CorrelationValue[] {
-  const numericColumns = columns
-    .filter((column) => column.inferredType === 'integer' || column.inferredType === 'decimal')
-    .slice(0, MAX_CORRELATION_COLUMNS);
+  const numericColumns = columns.filter((column) => column.inferredType === 'integer' || column.inferredType === 'decimal').slice(0, MAX_CORRELATION_COLUMNS);
   const values = new Map<string, Array<number | undefined>>();
   numericColumns.forEach((column) => values.set(column.name, rows.map((row) => {
     const value = row[column.name];
@@ -122,24 +101,14 @@ export function correlationProfile(rows: DataRow[], columns: ColumnProfile[]): C
 }
 
 function memoryUsageMB(rows: DataRow[]): number {
-  try {
-    return new TextEncoder().encode(JSON.stringify(rows)).byteLength / 1_000_000;
-  } catch {
-    return 0;
-  }
+  try { return new TextEncoder().encode(JSON.stringify(rows)).byteLength / 1_000_000; }
+  catch { return 0; }
 }
 
 export function enhanceProfileRun(rows: DataRow[], run: ProfileRun): ProfileRun {
   const columns = enrichColumnProfiles(rows, run.columns);
   const numericColumnCount = columns.filter((column) => column.inferredType === 'integer' || column.inferredType === 'decimal').length;
-  return {
-    ...run,
-    columns,
-    memoryUsageMB: memoryUsageMB(rows),
-    numericColumnCount,
-    otherColumnCount: Math.max(0, columns.length - numericColumnCount),
-    correlations: correlationProfile(rows, columns),
-  };
+  return { ...run, columns, memoryUsageMB: memoryUsageMB(rows), numericColumnCount, otherColumnCount: Math.max(0, columns.length - numericColumnCount), correlations: correlationProfile(rows, columns) };
 }
 
 export function classificationLabel(type: DataType, column?: ColumnProfile): string {
