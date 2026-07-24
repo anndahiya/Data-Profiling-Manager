@@ -1,3 +1,4 @@
+import { isNullLike, normalizeNullTokens } from './nullPolicy';
 import type {
   ColumnProfile, DataType, DimensionResult, Issue, QualityDimension, QualityRule, QualitySummary,
   RuleResult, RuleSeverity, SkippedQualityRule,
@@ -5,8 +6,7 @@ import type {
 import type { DataRow } from './profiler';
 
 const BASE_DATE = '2026-01-01T00:00:00.000Z';
-const QUALITY_ENGINE_VERSION = 'web-dq-2.0';
-const NULL_LIKE = new Set(['', 'null', 'n/a', 'nan', '(blank)']);
+const QUALITY_ENGINE_VERSION = 'web-dq-2.1';
 
 export const DIMENSION_LIBRARY: QualityDimension[] = [
   { id: 'accuracy', name: 'Accuracy', description: 'Values correctly represent the real-world entity, event, or fact they describe.', weight: 1, enabled: true, source: 'Standard', createdAt: BASE_DATE, updatedAt: BASE_DATE },
@@ -25,20 +25,14 @@ export function createDefaultDimensions(): QualityDimension[] {
   return DIMENSION_LIBRARY.map((dimension) => ({ ...dimension }));
 }
 
-function isNullLike(value: unknown): boolean {
-  if (value === null || value === undefined) return true;
-  if (typeof value === 'number' && Number.isNaN(value)) return true;
-  return typeof value === 'string' && NULL_LIKE.has(value.trim().toLowerCase());
-}
-
 function isDateShaped(text: string): boolean {
   return /^(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4})(?:[ T].*)?$/.test(text)
     || /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?$/i.test(text)
     ? !Number.isNaN(Date.parse(text)) : false;
 }
 
-function inferValueType(value: unknown): DataType {
-  if (isNullLike(value)) return 'empty';
+function inferValueType(value: unknown, nullTokens: readonly string[]): DataType {
+  if (isNullLike(value, nullTokens)) return 'empty';
   if (typeof value === 'boolean') return 'boolean';
   if (typeof value === 'number') return Number.isInteger(value) ? 'integer' : 'decimal';
   if (value instanceof Date && !Number.isNaN(value.getTime())) return 'date';
@@ -50,13 +44,13 @@ function inferValueType(value: unknown): DataType {
   return 'text';
 }
 
-function patternFor(value: unknown): string {
-  if (isNullLike(value)) return '(null)';
+function patternFor(value: unknown, nullTokens: readonly string[]): string {
+  if (isNullLike(value, nullTokens)) return '(null)';
   return String(value).trim().replace(/[A-Z]/g, 'A').replace(/[a-z]/g, 'a').replace(/\d/g, '9').replace(/\s+/g, ' ');
 }
 
-function valueKey(value: unknown): string {
-  if (isNullLike(value)) return '(null)';
+function valueKey(value: unknown, nullTokens: readonly string[]): string {
+  if (isNullLike(value, nullTokens)) return '(null)';
   if (value instanceof Date) return value.toISOString();
   if (typeof value === 'object') return JSON.stringify(value);
   return String(value);
@@ -68,30 +62,30 @@ function numberValue(value?: string): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function evaluateRule(rows: DataRow[], rule: QualityRule): boolean[] {
+function evaluateRule(rows: DataRow[], rule: QualityRule, nullTokens: readonly string[]): boolean[] {
   const values = rows.map((row) => row[rule.columnName]);
   if (rule.ruleType === 'unique') {
     const counts = new Map<string, number>();
     values.forEach((value) => {
-      const key = valueKey(value);
+      const key = valueKey(value, nullTokens);
       if (key !== '(null)') counts.set(key, (counts.get(key) ?? 0) + 1);
     });
     return values.map((value) => {
-      const key = valueKey(value);
+      const key = valueKey(value, nullTokens);
       return key !== '(null)' && (counts.get(key) ?? 0) === 1;
     });
   }
   return values.map((value) => {
-    if (rule.ruleType === 'not-null') return !isNullLike(value);
-    if (isNullLike(value)) return true;
+    if (rule.ruleType === 'not-null') return !isNullLike(value, nullTokens);
+    if (isNullLike(value, nullTokens)) return true;
     const text = String(value).trim();
     if (rule.ruleType === 'type') {
-      const observed = inferValueType(value);
+      const observed = inferValueType(value, nullTokens);
       return observed === rule.expectedValue || (rule.expectedValue === 'decimal' && observed === 'integer');
     }
     if (rule.ruleType === 'pattern') {
-      try { return new RegExp(rule.expectedValue ?? '').test(text) || patternFor(value) === rule.expectedValue; }
-      catch { return patternFor(value) === rule.expectedValue; }
+      try { return new RegExp(rule.expectedValue ?? '').test(text) || patternFor(value, nullTokens) === rule.expectedValue; }
+      catch { return patternFor(value, nullTokens) === rule.expectedValue; }
     }
     if (rule.ruleType === 'freshness') {
       const days = Math.max(0, numberValue(rule.expectedValue) ?? 30);
@@ -119,10 +113,11 @@ function activeDimensionMap(dimensions?: QualityDimension[]): Map<string, Qualit
   return new Map(catalog.filter((dimension) => dimension.enabled).map((dimension) => [dimension.name.toLowerCase(), dimension]));
 }
 
-function configurationFingerprint(rules: QualityRule[], dimensions: QualityDimension[]): string {
+function configurationFingerprint(rules: QualityRule[], dimensions: QualityDimension[], nullTokens: readonly string[]): string {
   const value = JSON.stringify({
     rules: [...rules].sort((a, b) => a.id.localeCompare(b.id)).map(({ id, datasetId, name, dimension, columnName, ruleType, expectedValue, secondaryValue, enabled, weight, threshold, severity }) => ({ id, datasetId, name, dimension, columnName, ruleType, expectedValue, secondaryValue, enabled, weight, threshold, severity })),
     dimensions: [...dimensions].sort((a, b) => a.id.localeCompare(b.id)).map(({ id, name, description, weight, enabled, source }) => ({ id, name, description, weight, enabled, source })),
+    nullTokens,
   });
   let hash = 0x811c9dc5;
   for (let index = 0; index < value.length; index += 1) {
@@ -147,7 +142,8 @@ export function buildSuggestedRules(datasetId: string, columns: ColumnProfile[])
   return rules;
 }
 
-export function evaluateConfiguredQuality(rows: DataRow[], columns: ColumnProfile[], configuredRules: QualityRule[], dimensions?: QualityDimension[]): QualitySummary {
+export function evaluateConfiguredQuality(rows: DataRow[], columns: ColumnProfile[], configuredRules: QualityRule[], dimensions?: QualityDimension[], configuredNullTokens?: readonly string[]): QualitySummary {
+  const nullTokens = normalizeNullTokens(configuredNullTokens);
   const dimensionMap = activeDimensionMap(dimensions);
   const availableColumns = new Set(columns.map((column) => column.name));
   const skippedRules: SkippedQualityRule[] = [];
@@ -166,8 +162,8 @@ export function evaluateConfiguredQuality(rows: DataRow[], columns: ColumnProfil
   const contributingDimensions = [...new Set(rules.map((rule) => rule.dimension.toLowerCase()))]
     .map((name) => dimensionMap.get(name)).filter((item): item is QualityDimension => Boolean(item)).map((item) => ({ ...item }));
   const evaluatedAt = new Date().toISOString();
-  const fingerprint = configurationFingerprint(rules, contributingDimensions);
-  const snapshot = { version: 1 as const, engineVersion: QUALITY_ENGINE_VERSION, configurationFingerprint: fingerprint, evaluatedAt, rules: rules.map((rule) => ({ ...rule })), dimensions: contributingDimensions };
+  const fingerprint = configurationFingerprint(rules, contributingDimensions, nullTokens);
+  const snapshot = { version: 1 as const, engineVersion: QUALITY_ENGINE_VERSION, configurationFingerprint: fingerprint, evaluatedAt, rules: rules.map((rule) => ({ ...rule })), dimensions: contributingDimensions, nullTokens };
   if (!rules.length) return {
     evaluatedRecords: rows.length, passingRecords: 0, failingRecords: 0, overallScore: 0, recordComplianceScore: 0,
     dimensions: [], rulesEvaluated: 0, ruleResults: [], scoringMethod: 'weighted-rule-average', evaluationStatus: 'not-evaluated',
@@ -175,7 +171,7 @@ export function evaluateConfiguredQuality(rows: DataRow[], columns: ColumnProfil
   };
 
   const evaluations = rules.map((rule) => {
-    const passes = evaluateRule(rows, rule);
+    const passes = evaluateRule(rows, rule, nullTokens);
     const passingRecords = passes.filter(Boolean).length;
     const result: RuleResult = {
       ruleId: rule.id, ruleName: rule.name, dimension: rule.dimension, columnName: rule.columnName, ruleType: rule.ruleType,
