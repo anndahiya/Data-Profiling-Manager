@@ -1,4 +1,4 @@
-import type { ProfileRun, QualityDimension, QualityRule } from './types';
+import type { ProfileFailureStage, ProfileRun, QualityDimension, QualityRule } from './types';
 
 export interface ProfileWorkerInput {
   file: File;
@@ -6,6 +6,21 @@ export interface ProfileWorkerInput {
   sourceKind: ProfileRun['sourceKind'];
   rules: QualityRule[];
   dimensions?: QualityDimension[];
+  nullTokens?: string[];
+}
+
+export interface ProfileWorkerProgress {
+  message: string;
+  stage: ProfileFailureStage;
+}
+
+export class ProfileWorkerError extends Error {
+  stage: ProfileFailureStage;
+  constructor(message: string, stage: ProfileFailureStage, errorName?: string) {
+    super(message);
+    this.name = errorName || 'ProfileWorkerError';
+    this.stage = stage;
+  }
 }
 
 export interface ProfileWorkerJob {
@@ -13,7 +28,7 @@ export interface ProfileWorkerJob {
   cancel: () => void;
 }
 
-export function startProfileWorker(input: ProfileWorkerInput, onProgress?: (message: string) => void): ProfileWorkerJob {
+export function startProfileWorker(input: ProfileWorkerInput, onProgress?: (progress: ProfileWorkerProgress) => void): ProfileWorkerJob {
   const id = crypto.randomUUID();
   const worker = new Worker(new URL('./profile.worker.ts', import.meta.url), { type: 'module', name: 'data-profile-worker' });
   let settled = false;
@@ -27,22 +42,22 @@ export function startProfileWorker(input: ProfileWorkerInput, onProgress?: (mess
 
   const promise = new Promise<ProfileRun>((resolve, reject) => {
     rejectPromise = reject;
-    worker.onmessage = (event: MessageEvent<{ id: string; type: 'progress' | 'complete' | 'error'; message?: string; run?: ProfileRun }>) => {
+    worker.onmessage = (event: MessageEvent<{ id: string; type: 'progress' | 'complete' | 'error'; message?: string; run?: ProfileRun; stage?: ProfileFailureStage; errorName?: string }>) => {
       if (event.data.id !== id || settled) return;
       if (event.data.type === 'progress') {
-        onProgress?.(event.data.message ?? 'Profiling…');
+        onProgress?.({ message: event.data.message ?? 'Profiling…', stage: event.data.stage ?? 'profiling' });
         return;
       }
       settled = true;
       cleanup();
       if (event.data.type === 'complete' && event.data.run) resolve(event.data.run);
-      else reject(new Error(event.data.message ?? 'The profile could not be completed.'));
+      else reject(new ProfileWorkerError(event.data.message ?? 'The profile could not be completed.', event.data.stage ?? 'profiling', event.data.errorName));
     };
     worker.onerror = (event) => {
       if (settled) return;
       settled = true;
       cleanup();
-      reject(new Error(event.message || 'The browser profiling worker stopped unexpectedly.'));
+      reject(new ProfileWorkerError(event.message || 'The browser profiling worker stopped unexpectedly.', 'profiling', 'WorkerError'));
     };
     worker.postMessage({ id, ...input });
   });
