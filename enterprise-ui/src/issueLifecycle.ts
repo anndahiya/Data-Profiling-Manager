@@ -12,7 +12,8 @@ export function issueIdentity(issue: Issue): string {
   if (issue.category === 'Schema change') return 'observability:schema-change';
   if (issue.category === 'Record volume') return 'observability:record-volume';
   if (issue.category === 'Freshness') return `observability:freshness:${slug(issue.metric || 'source')}`;
-  return `observability:anomaly:${slug(issue.metric || issue.title)}`;
+  if (issue.category === 'Anomaly') return `observability:anomaly:${slug(issue.metric || 'outliers')}`;
+  return `issue:${slug(issue.metric || issue.title)}`;
 }
 
 export interface IssueReconciliationPlan {
