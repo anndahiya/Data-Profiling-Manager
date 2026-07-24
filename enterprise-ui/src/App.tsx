@@ -10,6 +10,7 @@ import { OverviewPage } from './pages/OverviewPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { RunReportPage } from './pages/RunReportPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { TrendsPage } from './pages/TrendsPage';
 
 export default function App() {
   const { workspace, loading, reload } = useWorkspace();
@@ -24,6 +25,7 @@ export default function App() {
     <Route path="/runs/:runId" element={<RunReportPage workspace={workspace} />} />
     <Route path="/history" element={<HistoryPage workspace={workspace} reload={reload} />} />
     <Route path="/compare" element={<ComparePage workspace={workspace} />} />
+    <Route path="/trends" element={<TrendsPage workspace={workspace} />} />
     <Route path="/issues" element={<IssuesPage workspace={workspace} reload={reload} />} />
     <Route path="/rules" element={<RulesPage workspace={workspace} reload={reload} />} />
     <Route path="/monitoring" element={<MonitoringWorkspacePage workspace={workspace} reload={reload} />} />
