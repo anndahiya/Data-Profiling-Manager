@@ -5,7 +5,7 @@ import { AssetDetailPage, AssetsPage } from './pages/AssetsPage';
 import { ComparePage, HistoryPage } from './pages/HistoryComparePages';
 import { ConnectionsWorkspacePage } from './pages/ConnectionsWorkspacePage';
 import { IssuesPage } from './pages/IssuesPage';
-import { RulesPage } from './pages/IssuesRulesPages';
+import { RulesPage } from './pages/RulesPage';
 import { MonitoringWorkspacePage } from './pages/MonitoringWorkspacePage';
 import { OverviewPage } from './pages/OverviewPage';
 import { ProfilePage } from './pages/ProfilePage';
