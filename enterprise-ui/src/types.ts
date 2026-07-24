@@ -10,6 +10,7 @@ export type ScheduleCadence = 'Daily' | 'Weekly' | 'Monthly' | 'Quarterly' | 'Ye
 export type DeliveryMode = 'every-run' | 'breach-only';
 export type ColumnClassification = 'Empty' | 'Constant' | 'Likely key' | 'Measure' | 'Date/time' | 'Boolean' | 'Categorical/other';
 export type QualityEvaluationStatus = 'governed' | 'not-evaluated' | 'legacy';
+export type ProfileFailureStage = 'source-selection' | 'file-validation' | 'parsing' | 'profiling' | 'advanced-statistics' | 'quality-evaluation' | 'saving';
 
 export interface DatasetSource {
   mode: SourceMode;
@@ -157,6 +158,7 @@ export interface QualityEvaluationSnapshot {
   evaluatedAt: string;
   rules: QualityRule[];
   dimensions: QualityDimension[];
+  nullTokens?: string[];
 }
 
 export interface SkippedQualityRule {
@@ -219,6 +221,7 @@ export interface Dataset {
   updatedAt: string;
   latestRunId?: string;
   source?: DatasetSource;
+  nullTokens?: string[];
 }
 
 export interface ProfileRun {
@@ -241,6 +244,20 @@ export interface ProfileRun {
   quality: QualitySummary;
   sourceKind: 'CSV' | 'Excel' | 'Parquet' | 'Demo' | 'Linked file' | 'Linked folder' | 'Database';
   sourceReference?: string;
+  nullTokens?: string[];
+}
+
+export interface ProfileFailure {
+  id: string;
+  datasetId?: string;
+  assetName: string;
+  sourceName?: string;
+  sourceMode: SourceMode;
+  startedAt: string;
+  failedAt: string;
+  stage: ProfileFailureStage;
+  message: string;
+  errorName?: string;
 }
 
 export interface SchemaDiff {
@@ -276,6 +293,7 @@ export interface WorkspaceSettings {
   autoCleanupEnabled: boolean;
   maxRunsPerAsset: number;
   resolvedIssueRetentionDays: number;
+  failedRunRetentionDays?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -283,6 +301,7 @@ export interface WorkspaceSettings {
 export interface WorkspaceSnapshot {
   datasets: Dataset[];
   runs: ProfileRun[];
+  failures?: ProfileFailure[];
   issues: Issue[];
   rules: QualityRule[];
   dimensions?: QualityDimension[];
