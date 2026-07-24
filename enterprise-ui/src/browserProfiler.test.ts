@@ -21,8 +21,8 @@ describe('hardened browser profiler', () => {
   });
 
   it('does not convert blank numeric values to zero in distribution-shape calculations', () => {
-    const base = profileBrowserRows([{ amount: '1' }, { amount: '' }, { amount: '3' }], 'customer', 'customers.csv', 'CSV');
-    const run = enhanceProfileRun([{ amount: '1' }, { amount: '' }, { amount: '3' }], base);
+    const rows = [{ amount: '1' }, { amount: '' }, { amount: '2' }, { amount: '3' }];
+    const run = enhanceProfileRun(rows, profileBrowserRows(rows, 'customer', 'customers.csv', 'CSV'));
     expect(run.columns[0].numericStats?.mean).toBe(2);
     expect(run.columns[0].numericStats?.skewness).toBe(0);
   });
