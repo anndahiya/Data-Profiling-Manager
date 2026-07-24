@@ -1,3 +1,4 @@
+import { hasGovernedQuality } from './scoring';
 import type { DimensionResult, ProfileRun, WorkspaceSnapshot } from './types';
 
 export const CHART_COLORS = ['#5b5bd6', '#8b5cf6', '#0ea5a4', '#d97706', '#db2777', '#2563eb', '#7c3aed', '#059669'];
@@ -19,33 +20,35 @@ export function latestRunFor(datasetId: string, runs: ProfileRun[]): ProfileRun 
   return runs.filter((run) => run.datasetId === datasetId).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
 }
 
-function weightedQuality(runs: ProfileRun[]): number {
-  const evaluated = runs.reduce((sum, run) => sum + Math.max(1, run.quality.evaluatedRecords), 0);
-  const score = runs.reduce((sum, run) => sum + run.quality.overallScore * Math.max(1, run.quality.evaluatedRecords), 0);
-  return evaluated ? score / evaluated : 0;
+function weightedQuality(runs: ProfileRun[]): number | undefined {
+  const governed = runs.filter((run) => hasGovernedQuality(run.quality));
+  const evaluated = governed.reduce((sum, run) => sum + Math.max(1, run.quality.evaluatedRecords), 0);
+  const score = governed.reduce((sum, run) => sum + run.quality.overallScore * Math.max(1, run.quality.evaluatedRecords), 0);
+  return evaluated ? score / evaluated : undefined;
 }
 
-export function weightedOverallQuality(workspace: WorkspaceSnapshot): number {
+export function weightedOverallQuality(workspace: WorkspaceSnapshot): number | undefined {
   const latest = workspace.datasets.map((dataset) => latestRunFor(dataset.id, workspace.runs)).filter(Boolean) as ProfileRun[];
   return weightedQuality(latest);
 }
 
-export function workspaceQualityTrend(workspace: WorkspaceSnapshot): Array<{ date: string; quality: number; evaluatedRecords: number }> {
+export function workspaceQualityTrend(workspace: WorkspaceSnapshot): Array<{ date: string; quality: number | null; evaluatedRecords: number }> {
   const chronological = [...workspace.runs].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const latestByDataset = new Map<string, ProfileRun>();
   return chronological.map((run) => {
     latestByDataset.set(run.datasetId, run);
     const active = [...latestByDataset.values()];
+    const quality = weightedQuality(active);
     return {
       date: new Date(run.createdAt).toLocaleDateString('en', { month: 'short', day: 'numeric' }),
-      quality: Number(weightedQuality(active).toFixed(1)),
-      evaluatedRecords: active.reduce((sum, item) => sum + item.quality.evaluatedRecords, 0),
+      quality: quality === undefined ? null : Number(quality.toFixed(1)),
+      evaluatedRecords: active.filter((item) => hasGovernedQuality(item.quality)).reduce((sum, item) => sum + item.quality.evaluatedRecords, 0),
     };
   });
 }
 
 export function weightedDimensions(workspace: WorkspaceSnapshot): Array<{ dimension: string; score: number }> {
-  const latest = workspace.datasets.map((dataset) => latestRunFor(dataset.id, workspace.runs)).filter(Boolean) as ProfileRun[];
+  const latest = workspace.datasets.map((dataset) => latestRunFor(dataset.id, workspace.runs)).filter((run): run is ProfileRun => Boolean(run) && hasGovernedQuality(run.quality));
   const names = [...new Set(latest.flatMap((run) => run.quality.dimensions.map((dimension) => dimension.dimension)))];
   return names.map((dimension) => {
     const results = latest
