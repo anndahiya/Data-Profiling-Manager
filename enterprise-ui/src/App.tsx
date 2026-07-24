@@ -19,7 +19,7 @@ export default function App() {
     <Route path="/" element={<Navigate to="/overview" replace />} />
     <Route path="/overview" element={<OverviewPage workspace={workspace} />} />
     <Route path="/assets" element={<AssetsPage workspace={workspace} />} />
-    <Route path="/assets/:datasetId" element={<AssetDetailPage workspace={workspace} />} />
+    <Route path="/assets/:datasetId" element={<AssetDetailPage workspace={workspace} reload={reload} />} />
     <Route path="/profile" element={<ProfilePage workspace={workspace} reload={reload} />} />
     <Route path="/connections" element={<ConnectionsWorkspacePage workspace={workspace} reload={reload} />} />
     <Route path="/runs/:runId" element={<RunReportPage workspace={workspace} />} />
