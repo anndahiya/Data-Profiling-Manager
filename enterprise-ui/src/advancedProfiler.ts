@@ -1,6 +1,8 @@
 import type { ColumnClassification, ColumnProfile, CorrelationValue, DataType, ProfileRun } from './types';
 import type { DataRow } from './profiler';
 
+export const MAX_CORRELATION_COLUMNS = 40;
+
 function isMissing(value: unknown): boolean {
   if (value === null || value === undefined) return true;
   if (typeof value === 'number' && Number.isNaN(value)) return true;
@@ -9,7 +11,11 @@ function isMissing(value: unknown): boolean {
 }
 
 function finiteNumbers(rows: DataRow[], column: string): number[] {
-  return rows.map((row) => Number(row[column])).filter(Number.isFinite);
+  return rows
+    .map((row) => row[column])
+    .filter((value) => !isMissing(value))
+    .map(Number)
+    .filter(Number.isFinite);
 }
 
 function distributionShape(values: number[]): { skewness?: number; kurtosis?: number } {
@@ -94,7 +100,9 @@ function pearson(left: Array<number | undefined>, right: Array<number | undefine
 }
 
 export function correlationProfile(rows: DataRow[], columns: ColumnProfile[]): CorrelationValue[] {
-  const numericColumns = columns.filter((column) => column.inferredType === 'integer' || column.inferredType === 'decimal');
+  const numericColumns = columns
+    .filter((column) => column.inferredType === 'integer' || column.inferredType === 'decimal')
+    .slice(0, MAX_CORRELATION_COLUMNS);
   const values = new Map<string, Array<number | undefined>>();
   numericColumns.forEach((column) => values.set(column.name, rows.map((row) => {
     const value = row[column.name];
