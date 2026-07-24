@@ -78,6 +78,27 @@
 
 .mobile-menu span { font-size: 11px; font-weight: 650; }
 
+.trend-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.trend-dataset-select { min-width: min(360px, 100%); }
+.compact-empty { min-height: 260px; }
+.correlation-table th,
+.correlation-table td { text-align: center; }
+.correlation-table thead th:first-child,
+.correlation-table tbody th { position: sticky; left: 0; z-index: 2; text-align: left; background: #f7f8fb; }
+.correlation-cell { font-variant-numeric: tabular-nums; }
+.correlation-cell.strong { color: #2f2d84; background: #e9e9ff; font-weight: 750; }
+.correlation-cell.moderate { color: #4e4b9e; background: #f2f2ff; font-weight: 650; }
+.correlation-cell.weak { color: #74798c; }
+
+@media (max-width: 1050px) {
+  .trend-grid { grid-template-columns: 1fr; }
+}
+
 @media (max-width: 760px) {
   .mobile-menu {
     width: auto;
