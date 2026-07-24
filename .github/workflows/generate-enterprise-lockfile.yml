@@ -1,0 +1,30 @@
+name: Generate Enterprise UI Lockfile
+
+on:
+  pull_request:
+    paths:
+      - "enterprise-ui/package.json"
+      - ".github/workflows/generate-enterprise-lockfile.yml"
+  workflow_dispatch:
+
+jobs:
+  lockfile:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: enterprise-ui
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - run: npm install --package-lock-only --ignore-scripts --no-fund
+      - uses: actions/upload-artifact@v4
+        with:
+          name: enterprise-ui-package-lock
+          path: enterprise-ui/package-lock.json
+          if-no-files-found: error
+          retention-days: 1
