@@ -14,12 +14,13 @@ function policy(overrides: Partial<MonitorPolicy> = {}): MonitorPolicy {
 
 describe('monitoring configuration', () => {
   it('converts supported cadences to UTC cron expressions', () => {
+    expect(cadenceToCron(policy({ cadence: 'Daily', hourUtc: 8, minute: 15 }))).toBe('15 8 * * *');
     expect(cadenceToCron(policy())).toBe('0 7 1 * *');
     expect(cadenceToCron(policy({ cadence: 'Weekly', weekday: 'Friday', hourUtc: 14, minute: 30 }))).toBe('30 14 * * 5');
-    expect(cadenceToCron(policy({ cadence: 'Quarterly', dayOfMonth: 10 }))).toBe('0 7 10 1,4,7,10 *');
+    expect(cadenceToCron(policy({ cadence: 'Quarterly', dayOfMonth: 10, month: 2 }))).toBe('0 7 10 2,5,8,11 *');
   });
 
-  it('exports schedule thresholds delivery settings and modern actions', () => {
+  it('exports schedule thresholds delivery settings and safer runner defaults', () => {
     const csv = policiesToCsv([policy()], [{ id: 'customer', name: 'Customers', owner: '', description: '', tags: [], createdAt: '', updatedAt: '' }]);
     expect(csv).toContain('delivery_mode');
     expect(csv).toContain('breach-only');
@@ -27,6 +28,15 @@ describe('monitoring configuration', () => {
     const workflow = buildScheduledWorkflow([policy()]);
     expect(workflow).toContain('actions/checkout@v6');
     expect(workflow).toContain('python monthly_profiling_agent.py --cron');
+    expect(workflow).toContain('runs-on: [self-hosted, linux]');
+    expect(workflow).toContain('retention-days: 7');
+  });
+
+  it('does not invent a recurring schedule when every monitor is paused', () => {
+    const workflow = buildScheduledWorkflow([policy({ enabled: false })]);
+    expect(workflow).toContain('workflow_dispatch:');
+    expect(workflow).not.toContain('schedule:');
+    expect(workflow).not.toContain('0 7 1 * *');
   });
 
   it('exports governed rules without source rows or credentials', () => {
